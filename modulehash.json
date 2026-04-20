@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "scopes": {
+        "shop-root": {
+            "hashes": {
+                "/admin/images/icons/heading/bx_block_contacts.png": "97322f2f06dc62a830a8f0419fa3b34b",
+                "/admin/includes/extra/functions/bx_block_contacts.php": "9df0bf42bad12f95ef1d418f092b6419",
+                "/admin/includes/modules/system/bx_block_contacts.php": "800726dbfaab94262ccbc459d29b92be",
+                "/lang/english/extra/admin/bx_block_contacts.php": "651812b75bff987848bb78bcefb5afc5",
+                "/lang/english/modules/system/bx_block_contacts.php": "53e00a221a93170ff7e8bb759bf31c49",
+                "/lang/german/extra/admin/bx_block_contacts.php": "4e4cae51a3fdd72d671a6d39745c29af",
+                "/lang/german/modules/system/bx_block_contacts.php": "4600f7f2aedb0ddaf3c259e9b5f30fdb",
+                "/media/content/bx_block_contacts.php": "d8f07b4b5d35e80a1d64150e9e50fc31"
+            }
+        },
+        "shop-vendor-mmlc": {
+            "hashes": []
+        }
+    }
+}
