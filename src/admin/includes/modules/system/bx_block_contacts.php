@@ -30,7 +30,7 @@ class bx_block_contacts {
 
   public function __construct() {
 		$this->code        = 'bx_block_contacts';
-    $this->version     = '1.0';
+    $this->version     = '1.0.0';
     $this->title       = MODULE_BLOCK_CONTACTS_TEXT_TITLE;
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
     $this->sort_order  = defined('MODULE_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BLOCK_CONTACTS_SORT_ORDER : 0;
