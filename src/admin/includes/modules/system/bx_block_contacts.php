@@ -20,8 +20,6 @@ defined( '_VALID_XTC' ) or die( 'Direct Access to this location is not allowed.'
 
 class bx_block_contacts {
 	public string $code;
-	public string $version;
-	public string $development_status; // 'p' = production ready, 'd' = in development
 	public string $title;
 	public string $description;
 	public int $sort_order;
@@ -30,20 +28,17 @@ class bx_block_contacts {
 
   public function __construct() {
 		$this->code        = 'bx_block_contacts';
-    $this->version     = '1.0.0';
-    $this->title       = MODULE_BLOCK_CONTACTS_TEXT_TITLE;
+    $this->title       = MODULE_BX_BLOCK_CONTACTS_TITLE;
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
-    $this->sort_order  = defined('MODULE_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BLOCK_CONTACTS_SORT_ORDER : 0;
-    $this->enabled     = defined('MODULE_BLOCK_CONTACTS_STATUS') ? ((MODULE_BLOCK_CONTACTS_STATUS == 'true') ? true : false) : 0;
-		$this->development_status = 'p';
+    $this->sort_order  = defined('MODULE_BX_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BX_BLOCK_CONTACTS_SORT_ORDER : 0;
+    $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') ? ((MODULE_BX_BLOCK_CONTACTS_STATUS == 'true') ? true : false) : 0;
    }
 
   public function process(): never {
-		var_dump($_GET);
 		$json = array( 'emails' => array(), 'domains' => array(), 'localparts' => array(), );
 		
-		if(!empty(MODULE_BLOCKED_CONTACTS)) {
-			$json = json_decode(MODULE_BLOCKED_CONTACTS, true);
+		if(!empty(MODULE_BX_BLOCK_CONTACTS_BLOCKED)) {
+			$json = json_decode(MODULE_BX_BLOCK_CONTACTS_BLOCKED, true);
 		}
 
 		if(isset($_POST["block_email"]) && !empty($_POST["block_email"])) {
@@ -96,7 +91,7 @@ class bx_block_contacts {
 		$blocked = json_encode($json);
 		xtc_db_perform(TABLE_CONFIGURATION, array('configuration_value' => $blocked,
 																							'last_modified' => 'now()'),
-																							'update', "configuration_key='MODULE_BLOCKED_CONTACTS'");
+																							'update', "configuration_key='MODULE_BX_BLOCK_CONTACTS_BLOCKED'");
 		
 		xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT,'set=system&module='.$this->code.'&action=edit'));
   }
@@ -140,7 +135,7 @@ class bx_block_contacts {
     if (!isset($this->_check)) {
       $check_query = xtc_db_query("SELECT configuration_value 
                                      FROM ".TABLE_CONFIGURATION."
-                                    WHERE configuration_key = 'MODULE_BLOCK_CONTACTS_STATUS'");
+                                    WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_STATUS'");
       $this->_check = xtc_db_num_rows($check_query);
     }
     return $this->_check;
@@ -182,7 +177,7 @@ class bx_block_contacts {
 																												use_function, 
 																												set_function )
 																							 VALUES ( '', 
-																							          'MODULE_BLOCK_CONTACTS_STATUS',
+																							          'MODULE_BX_BLOCK_CONTACTS_STATUS',
 																												'true', 
 																												'6', 
 																												'1', 
@@ -199,14 +194,14 @@ class bx_block_contacts {
 																												use_function, 
 																												set_function )
 																							 VALUES ( '', 
-																							          'MODULE_BLOCK_CONTACTS_CONFIG_ID',
+																							          'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID',
 																							          '".$freeId["id"]."', 
 																												'6', 
 																												'2', 
 																												now(), 
 																												'bx_bc_get_group_id', 
 																												'xtc_convert_value( ')");
-		
+
 		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
 		                                                    configuration_key, 
 																												configuration_value, 
@@ -216,10 +211,44 @@ class bx_block_contacts {
 																												use_function, 
 																												set_function )
 																							 VALUES ( '', 
-																							          'MODULE_BLOCKED_CONTACTS',
+																							          'MODULE_BX_BLOCK_CONTACTS_DEVELOPMENT',
+																							          'unstable', 
+																												'6', 
+																												'3', 
+																												now(), 
+																												'', 
+																												'xtc_cfg_select_option(array(\\'production\\', \\'development\\', \\'release\\', \\'unstable\\'), ')");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
+		                                                    configuration_key, 
+																												configuration_value, 
+																												configuration_group_id, 
+																												sort_order, 
+																												date_added, 
+																												use_function, 
+																												set_function )
+																							 VALUES ( '', 
+																							          'MODULE_BX_BLOCK_CONTACTS_VERSION',
+																							          '1.0.0', 
+																												'6', 
+																												'4', 
+																												now(), 
+																												'', 
+																												'')");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
+		                                                    configuration_key, 
+																												configuration_value, 
+																												configuration_group_id, 
+																												sort_order, 
+																												date_added, 
+																												use_function, 
+																												set_function )
+																							 VALUES ( '', 
+																							          'MODULE_BX_BLOCK_CONTACTS_BLOCKED',
 																							          '', 
 																												'".$freeId["id"]."', 
-																												'2', 
+																												'1', 
 																												now(), 
 																												'', 
 																												'bx_show_blocked( ')");
@@ -233,10 +262,110 @@ class bx_block_contacts {
 
   public function keys(): array {
     $key = array(
-      'MODULE_BLOCK_CONTACTS_STATUS',
-			'MODULE_BLOCK_CONTACTS_CONFIG_ID',
-      'MODULE_BLOCKED_CONTACTS',
+      'MODULE_BX_BLOCK_CONTACTS_STATUS',
+			'MODULE_BX_BLOCK_CONTACTS_VERSION',
+			'MODULE_BX_BLOCK_CONTACTS_DEVELOPMENT',
+			'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID',
+      'MODULE_BX_BLOCK_CONTACTS_BLOCKED',
     );
     return $key;
   }
+
+    public function custom(): never {
+      global $messageStack;
+      $result = true;
+        
+      // Dateien definieren
+      $dirs_and_files   = array();
+
+			$dirs_and_files[] = DIR_FS_ADMIN . 'images/icons/heading/bx_block_contacts.png';
+			$dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/functions/bx_block_contacts.php';
+			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/extra/admin/bx_block_contacts.php';
+			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/modules/system/bx_block_contacts.php';
+			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/extra/admin/bx_block_contacts.php';
+			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/modules/system/bx_block_contacts.php';
+			$dirs_and_files[] = DIR_FS_CATALOG . 'media/content/bx_block_contacts.php';
+
+      // Dateien löschen
+      foreach ($dirs_and_files as $dir_or_file) {
+        if (!$this->secureDelete($dir_or_file)) {
+          $messageStack->add_session($dir_or_file.MODULE_BX_BLOCK_CONTACTS_TEXT_COULD_NOT_BE_DELETED, 'error');
+          $result = false;
+        }
+      }
+        
+      if ($result === true) {
+        $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_SUCCESSFULLY_REMOVED, 'success');
+      } else {
+        $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_REMOVAL_INCOMPLETE, 'error');
+      }
+        
+      // Datei selbst löschen
+      $this->secureDelete(DIR_FS_ADMIN.'includes/modules/system/bx_block_contacts.php');
+
+      xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system'));
+    }
+
+    private function secureDelete(string $path): bool {
+      // 1. Existiert der Pfad überhaupt?
+      if (!file_exists($path)) {
+        return true;
+      }
+
+      // --- SICHERHEITS-CHECK ---
+      // Holt den echten, bereinigten Pfad (löst relative Teile auf)
+      $realPath  = realpath($path);
+      $adminRoot = realpath(DIR_FS_ADMIN);
+
+      // Sicherheitsregel A: Pfad darf nicht leer sein
+      if (empty($realPath) || empty($adminRoot)) {
+        return false;
+      }
+
+      // Sicherheitsregel B: Wenn der Pfad EXAKT dein Admin-Hauptordner 
+      // oder das Hauptverzeichnis (/) ist -> SOFORT ABBRECHEN!
+      if ($realPath === $adminRoot || $realPath === DIRECTORY_SEPARATOR) {
+        return false; 
+      }
+      // -----------------------------------
+
+      if (!is_writable($realPath)) {
+        return false;
+      }
+
+      // Wenn es eine Datei oder ein Symlink ist -> nur diese löschen und beenden!
+      if (!is_dir($realPath) || is_link($realPath)) {
+        return unlink($realPath);
+      }
+
+      // Nur wenn es ein Ordner ist, wird tiefer gegangen
+      try {
+        $iterator = new RecursiveIteratorIterator(
+          new RecursiveDirectoryIterator($realPath, FilesystemIterator::SKIP_DOTS),
+          RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $item) {
+          $itemPath = $item->getRealPath();
+
+          if (!is_writable($itemPath)) {
+            return false;
+          }
+          
+          if ($item->isDir() && !$item->isLink()) {
+            if (!rmdir($itemPath)) {
+              return false;
+            }
+          } else {
+            if (!unlink($itemPath)) {
+              return false;
+            }
+          }
+        }
+      } catch (UnexpectedValueException $e) {
+        return false;
+      }
+
+      return rmdir($realPath);
+    }
 }

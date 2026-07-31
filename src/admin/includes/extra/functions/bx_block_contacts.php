@@ -17,17 +17,17 @@
    ----------------------------------------------------------------------------------------------*/
 
 function bx_show_blocked () {
-   if(!empty(MODULE_BLOCKED_CONTACTS)) {
+   if(!empty(MODULE_BX_BLOCK_CONTACTS_BLOCKED)) {
       $json = array( 'emails' => array(), 'domains' => array(), 'localparts' => array(), );
       $html = '<table class="collapse" style="width: 100%;">'."\n"
             . '  <tr class="dataTableHeadingRow">'."\n"
-            . '    <td class="dataTableHeadingContent">'.MODULE_BLOCKED_CONTACTS_TXT_EMAIL_ADDRESSES.'</td>'."\n"
-            . '    <td class="dataTableHeadingContent">'.MODULE_BLOCKED_CONTACTS_TXT_DOMAINS.'</td>'."\n"
-            . '    <td class="dataTableHeadingContent">'.MODULE_BLOCKED_CONTACTS_TXT_LOCAL_PARTS.'</td>'."\n"
+            . '    <td class="dataTableHeadingContent">'.MODULE_BX_BLOCK_CONTACTS_BLOCKED_TXT_EMAIL_ADDRESSES.'</td>'."\n"
+            . '    <td class="dataTableHeadingContent">'.MODULE_BX_BLOCK_CONTACTS_BLOCKED_TXT_DOMAINS.'</td>'."\n"
+            . '    <td class="dataTableHeadingContent">'.MODULE_BX_BLOCK_CONTACTS_BLOCKED_TXT_LOCAL_PARTS.'</td>'."\n"
             . '  </tr>'."\n"
             . '  <tr class="dataTableRow">'."\n";
 
-      $json = json_decode(MODULE_BLOCKED_CONTACTS, true);
+      $json = json_decode(MODULE_BX_BLOCK_CONTACTS_BLOCKED, true);
 
       foreach ($json as $key => $value) {
          switch ($key) {
@@ -84,16 +84,17 @@ function bx_show_blocked () {
       $html .= '  </tr>'."\n"
              . '</table>'."\n"
              . '<hr />'."\n";
+      return $html;
    }
-   return $html;
 }
 
 function bx_bc_get_group_id() {
 	$result = array();	
 	$result_query_raw = xtc_db_query("SELECT configuration_value AS value 
                                       FROM ".TABLE_CONFIGURATION."
-                                     WHERE configuration_key = 'MODULE_BLOCK_CONTACTS_CONFIG_ID'");
-	if( 0 < xtc_db_num_rows($result_query_raw)) {
+                                     WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID'");
+	$result_query = array();
+   if( 0 < xtc_db_num_rows($result_query_raw)) {
 	 	$result_query= xtc_db_fetch_array($result_query_raw);
 	}
 	$result = $result_query['value'];
