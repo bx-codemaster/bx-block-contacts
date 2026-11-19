@@ -1,0 +1,38 @@
+name: Build Module Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create clean release ZIP
+        run: |
+          SRC_DIR="$(jq -er '.srcDir | strings | select(length > 0)' moduleinfo.json)"
+          ARCHIVE_NAME="$(jq -er '.archiveName | strings | select(length > 0)' moduleinfo.json)"
+          MODULE_NAME="${ARCHIVE_NAME##*/}"
+          VERSION="${GITHUB_REF_NAME#v}"
+          RELEASE_ASSET="${MODULE_NAME}-${VERSION}.zip"
+
+          test -d "$SRC_DIR"
+          mkdir -p dist
+          git archive --format=zip --output="dist/$RELEASE_ASSET" "HEAD:$SRC_DIR"
+          sha256sum "dist/$RELEASE_ASSET" > "dist/$RELEASE_ASSET.sha256"
+
+          echo "RELEASE_ASSET=$RELEASE_ASSET" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/${{ env.RELEASE_ASSET }}
+            dist/${{ env.RELEASE_ASSET }}.sha256
+          generate_release_notes: true

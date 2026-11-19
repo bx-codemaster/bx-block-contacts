@@ -4,13 +4,13 @@
     "category": "productivity",
     "developer": "Axel Benkert",
     "developerWebsite": "https://www.bx-coding.de",
-    "website": "https://www.der-eisenhans.de",
+    "website": "https://www.bx-coding.de/modified-Module/BX-Block-Contacts--7.html",
     "srcDir": "src",
     "version": "auto",
     "shortDescription": "Ein Verwaltungstool für Modified eCommerce Shops.",
     "description": "BX Block Contacts ist ein professionelles Verwaltungstool für Modified eCommerce Shopsofware",
     "price": "free", 
-    "date": "2026-04-20 00:00:00",
+    "date": "2026-11-20 00:00:00",
     "php": {
       "version": "^7.4 || ^8.0"
     },

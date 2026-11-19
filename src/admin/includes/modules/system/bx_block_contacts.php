@@ -24,7 +24,9 @@ class bx_block_contacts {
 	public string $description;
 	public int $sort_order;
 	public bool $enabled;
+	public string $version;
 	private bool $_check;
+	public string $development_status; // '' = production ready, 'd' = in development, '' = Idee/Konzept
 
   public function __construct() {
 		$this->code        = 'bx_block_contacts';
@@ -32,6 +34,8 @@ class bx_block_contacts {
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
     $this->sort_order  = defined('MODULE_BX_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BX_BLOCK_CONTACTS_SORT_ORDER : 0;
     $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') ? ((MODULE_BX_BLOCK_CONTACTS_STATUS == 'true') ? true : false) : 0;
+    $this->version     = '1.1.0';
+    $this->development_status = 'p';
    }
 
   public function process(): never {
@@ -61,7 +65,7 @@ class bx_block_contacts {
 
 		if(isset($_GET["area"]) && !empty($_GET["area"])) {
 			switch($_GET["area"]) {
-				case 'emails';
+				case 'emails':
 					if(isset($_GET["value"]) && !empty($_GET["value"])){
 						$key = array_search(urldecode($_GET["value"]), $json["emails"]);
 						if (false !== $key) {
@@ -69,7 +73,7 @@ class bx_block_contacts {
 						}
 					}
 					break;
-				case 'domains';
+				case 'domains':
 					if(isset($_GET["value"]) && !empty($_GET["value"])){
 						$key = array_search(urldecode($_GET["value"]), $json["domains"]);
 						if (false !== $key) {
@@ -77,7 +81,7 @@ class bx_block_contacts {
 						}
 					}
 					break;
-				case 'localparts';
+				case 'localparts':
 					if(isset($_GET["value"]) && !empty($_GET["value"])){
 						$key = array_search(urldecode($_GET["value"]), $json["localparts"]);
 						if (false !== $key) {

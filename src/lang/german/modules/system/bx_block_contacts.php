@@ -22,7 +22,7 @@ $module_description = '
 <details class="bxac-card">
   <summary class="bxac-summary" style="list-style: none;">
     <span class="bxac-arrow">▸</span>
-    ' . xtc_image(DIR_WS_ICONS.'heading/bx_block_contacts.png', 'BX Block Contacts', '', '', 'style="max-height: 32px; margin: 2px;"') . '
+    ' . xtc_image(DIR_WS_ICONS.'heading/bx_block_contacts.png', 'BX Block Contacts',) . '
     <span class="bxac-title">BX Block Contacts</span>
 </summary>
   <div class="bxac-body">
