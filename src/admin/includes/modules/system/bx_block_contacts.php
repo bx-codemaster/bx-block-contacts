@@ -432,7 +432,7 @@ class bx_block_contacts {
 
     return $formStart
       . ($standaloneForm ? xtc_draw_hidden_field('bx_updater_action', 'install') : '')
-      . '<button type="submit"' . $actionField . ' class="button btnbox" onclick="return confirm(\''
+      . '<input type="submit"' . $actionField . ' class="button but_green" onclick="return confirm(\''
       . sprintf(
         MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM,
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
@@ -442,7 +442,7 @@ class bx_block_contacts {
         MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
       )
-      . '</button>' . $formEnd;
+      . '</input>' . $formEnd;
   }
 
   private function createUpdateNotice(): string

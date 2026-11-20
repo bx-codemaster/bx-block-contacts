@@ -84,7 +84,7 @@ declare(strict_types=1);
  * - shop_root:             shop root; defaults to DIR_FS_CATALOG.
  * - cache_dir:             updater state directory.
  * - github_token:          private-repository token, sent only to GitHub API.
- * - cache_ttl_seconds:     successful cache lifetime; default 24 hours.
+ * - cache_ttl_seconds:     successful cache lifetime; default 1 hour.
  * - exclude_paths:         merchant-customized paths never to replace/remove.
  * - maximum_archive_size
  * - maximum_extracted_size
@@ -263,7 +263,7 @@ class BxGithubModuleUpdater
             '/\\'
         );
         $this->githubToken = !empty($config['github_token']) ? (string) $config['github_token'] : null;
-        $this->cacheTtl = max(60, (int) ($config['cache_ttl_seconds'] ?? 86400));
+        $this->cacheTtl = max(60, (int) ($config['cache_ttl_seconds'] ?? 3600));
         $this->maximumArchiveSize = max(
             1024 * 1024,
             (int) ($config['maximum_archive_size'] ?? 50 * 1024 * 1024)
