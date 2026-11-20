@@ -63,6 +63,10 @@ define('MODULE_BX_BLOCK_CONTACTS_BLOCKED_TXT_LOCAL_PARTS' , 'Local parts');
 define('MODULE_BX_BLOCK_CONTACTS_TEXT_COULD_NOT_BE_DELETED', 'Could not be deleted.');
 define('MODULE_BX_BLOCK_CONTACTS_TEXT_SUCCESSFULLY_REMOVED', 'Successfully removed.');
 define('MODULE_BX_BLOCK_CONTACTS_TEXT_REMOVAL_INCOMPLETE', 'Removal incomplete.');
+define('MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE', 'Version %s is available. Existing module files will be backed up before updating.');
+define('MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON', 'Update to version %s');
+define('MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM', 'Update the module to version %s now?');
+define('MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE', 'The release is not installable yet.');
 
 defined('CFG_TXT_PRODUCTION') || define('CFG_TXT_PRODUCTION', 'Production');
 defined('CFG_TXT_DEVELOPMENT') || define('CFG_TXT_DEVELOPMENT', 'Development');

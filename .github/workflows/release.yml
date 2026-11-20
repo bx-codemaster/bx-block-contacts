@@ -16,15 +16,44 @@ jobs:
 
       - name: Create clean release ZIP
         run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag must use the vMAJOR.MINOR.PATCH format" >&2
+            exit 1
+          fi
+
+          VERSION="${GITHUB_REF_NAME#v}"
           SRC_DIR="$(jq -er '.srcDir | strings | select(length > 0)' moduleinfo.json)"
           ARCHIVE_NAME="$(jq -er '.archiveName | strings | select(length > 0)' moduleinfo.json)"
           MODULE_NAME="${ARCHIVE_NAME##*/}"
-          VERSION="${GITHUB_REF_NAME#v}"
           RELEASE_ASSET="${MODULE_NAME}-${VERSION}.zip"
 
           test -d "$SRC_DIR"
           mkdir -p dist
-          git archive --format=zip --output="dist/$RELEASE_ASSET" "HEAD:$SRC_DIR"
+          PACKAGE_DIR="$(mktemp -d)"
+          git archive "HEAD:$SRC_DIR" | tar -x -C "$PACKAGE_DIR"
+          python3 - "$PACKAGE_DIR" "$MODULE_NAME" "$VERSION" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          files = {
+              path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in sorted(root.rglob("*"))
+              if path.is_file()
+          }
+          manifest = {
+              "module": sys.argv[2],
+              "version": sys.argv[3],
+              "files": files,
+          }
+          (root / ".bx-module-manifest.json").write_text(
+              json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+              encoding="utf-8",
+          )
+          PY
+          (cd "$PACKAGE_DIR" && zip -qr "$GITHUB_WORKSPACE/dist/$RELEASE_ASSET" .)
           sha256sum "dist/$RELEASE_ASSET" > "dist/$RELEASE_ASSET.sha256"
 
           echo "RELEASE_ASSET=$RELEASE_ASSET" >> "$GITHUB_ENV"

@@ -25,10 +25,15 @@ class bx_block_contacts {
 	public int $sort_order;
 	public bool $enabled;
 	public string $version;
+  public array $properties = array();
 	private bool $_check;
+  private ?BxGithubModuleUpdater $githubUpdater = null;
+  private ?array $updateStatus = null;
 	public string $development_status; // '' = production ready, 'd' = in development, '' = Idee/Konzept
 
   public function __construct() {
+    require_once DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+
 		$this->code        = 'bx_block_contacts';
     $this->title       = MODULE_BX_BLOCK_CONTACTS_TITLE;
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
@@ -36,9 +41,33 @@ class bx_block_contacts {
     $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') ? ((MODULE_BX_BLOCK_CONTACTS_STATUS == 'true') ? true : false) : 0;
     $this->version     = '1.1.0';
     $this->development_status = 'p';
+
+    if (defined('MODULE_BX_BLOCK_CONTACTS_VERSION')) {
+      $this->updateStatus = $this->getGithubUpdater()->checkForUpdate();
+      if (
+        $this->updateStatus['has_update']
+        && !empty($this->updateStatus['zip_url'])
+        && !empty($this->updateStatus['sha256'])
+      ) {
+        $this->properties['button_update'] = $this->createUpdateButton(
+          $this->updateStatus['latest_version'],
+          true
+        );
+      }
+    }
    }
 
   public function process(): never {
+    if (($_POST['bx_updater_action'] ?? '') === 'install') {
+      global $messageStack;
+      $result = $this->getGithubUpdater()->installLatestUpdate();
+      $messageStack->add_session($result['message'], $result['ok'] ? 'success' : 'error');
+      xtc_redirect(xtc_href_link(
+        FILENAME_MODULE_EXPORT,
+        'set=system&module=' . $this->code . '&action=edit'
+      ));
+    }
+
 		$json = array( 'emails' => array(), 'domains' => array(), 'localparts' => array(), );
 		
 		if(!empty(MODULE_BX_BLOCK_CONTACTS_BLOCKED)) {
@@ -101,7 +130,7 @@ class bx_block_contacts {
   }
 
   public function display(): array {
-    $txt = '<input type="hidden" name="area" value="" /><input type="hidden" name="areavalue" value="" />
+    $txt = $this->createUpdateNotice() . '<input type="hidden" name="area" value="" /><input type="hidden" name="areavalue" value="" />
 		<table class="tableConfig">'. "\n"
          . '  <tbody>'. "\n"
          . '    <tr>'. "\n"
@@ -233,7 +262,7 @@ class bx_block_contacts {
 																												set_function )
 																							 VALUES ( '', 
 																							          'MODULE_BX_BLOCK_CONTACTS_VERSION',
-																							          '1.0.0', 
+																							          '1.1.0', 
 																												'6', 
 																												'4', 
 																												now(), 
@@ -275,7 +304,18 @@ class bx_block_contacts {
     return $key;
   }
 
-    public function custom(): never {
+    public function custom(): void {
+      if (($_POST['bx_updater_action'] ?? '') === 'install') {
+        global $messageStack;
+        $result = $this->getGithubUpdater()->installLatestUpdate();
+        $messageStack->add_session($result['message'], $result['ok'] ? 'success' : 'error');
+        return;
+      }
+
+      if (($_GET['delete'] ?? '') !== 'true') {
+        return;
+      }
+
       global $messageStack;
       $result = true;
         
@@ -308,6 +348,77 @@ class bx_block_contacts {
       $this->secureDelete(DIR_FS_ADMIN.'includes/modules/system/bx_block_contacts.php');
 
       xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system'));
+    }
+
+    private function getGithubUpdater(): BxGithubModuleUpdater
+    {
+      if ($this->githubUpdater === null) {
+        $this->githubUpdater = new BxGithubModuleUpdater(array(
+          'owner' => 'bx-codemaster',
+          'repo' => 'bx-block-contacts',
+          'module_name' => 'bx-block-contacts',
+          'module_prefix' => 'BX_BLOCK_CONTACTS',
+          'current_version' => version_compare(
+            $this->version,
+            MODULE_BX_BLOCK_CONTACTS_VERSION,
+            '>'
+          ) ? $this->version : MODULE_BX_BLOCK_CONTACTS_VERSION,
+        ));
+      }
+      return $this->githubUpdater;
+    }
+
+    private function createUpdateButton(string $version, bool $standaloneForm): string
+    {
+      $formStart = '';
+      $formEnd = '';
+      $actionField = ' name="bx_updater_action" value="install"';
+      if ($standaloneForm) {
+        $formStart = xtc_draw_form(
+          'bx_block_contacts_update',
+          FILENAME_MODULE_EXPORT,
+          'set=system&module=' . $this->code . '&action=custom'
+        );
+        $formEnd = '</form>';
+        $actionField = '';
+      }
+
+      return $formStart
+        . ($standaloneForm ? xtc_draw_hidden_field('bx_updater_action', 'install') : '')
+        . '<button type="submit"' . $actionField . ' class="button btnbox" onclick="return confirm(\''
+        . sprintf(
+          MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM,
+          htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
+        )
+        . '\');">'
+        . sprintf(
+          MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
+          htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
+        )
+        . '</button>' . $formEnd;
+    }
+
+    private function createUpdateNotice(): string
+    {
+      if (
+        $this->updateStatus === null
+        || !$this->updateStatus['has_update']
+        || empty($this->updateStatus['latest_version'])
+      ) {
+        return '';
+      }
+
+      return '<div class="messageStackWarning">'
+        . sprintf(
+          MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE,
+          htmlspecialchars($this->updateStatus['latest_version'], ENT_QUOTES, 'UTF-8')
+        )
+        . (
+          !empty($this->updateStatus['zip_url']) && !empty($this->updateStatus['sha256'])
+            ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
+            : ' ' . MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE
+        )
+        . '</div>';
     }
 
     private function secureDelete(string $path): bool {
