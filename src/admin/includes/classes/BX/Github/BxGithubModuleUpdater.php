@@ -3,48 +3,203 @@
 declare(strict_types=1);
 
 /**
- * Independent GitHub Release updater for modified eCommerce modules.
+ * Independent, signed GitHub Release updater for modified eCommerce modules.
  *
- * This class checks a module's GitHub repository for its latest release, caches
- * the result, offers version information to the calling module, and installs a
- * verified release archive directly into the shop root. It deliberately has no
- * dependency on MMLC or another module distribution server.
+ * PURPOSE
+ * =======
+ * Checks one configured GitHub repository for a newer release, caches its
+ * metadata and, after an explicit administrator action, installs a verified ZIP
+ * directly into the shop. The implementation deliberately has no dependency on
+ * MMLC or another distribution server.
  *
- * Repository, module name, configuration prefix, installed version, cache
- * lifetime, optional GitHub token, excluded paths, and maximum archive size are
- * supplied through the constructor configuration. The release must provide:
- * - A strict vMAJOR.MINOR.PATCH-based version tag with optional SemVer suffixes.
- * - A ZIP named "<module-name>-<version>.zip".
- * - A SHA-256 checksum as GitHub asset digest or matching .sha256 asset.
- * - A .bx-module-manifest.json at ZIP root level.
- * - A SHA-256 hash for every file listed in the manifest.
- * - A matching .bx-module-manifest.sig when public_key is configured.
+ * The complete trust chain is:
  *
- * Update installation is separated into validation, staging, backup, copying,
- * rollback, and optional database migration phases. Only an archive whose
- * complete hash, manifest, paths, sizes, file count, and individual file hashes
- * pass validation is installed. Absolute paths, traversal segments, symbolic
- * links, undeclared archive files, and excessive payloads are rejected.
+ *   GitHub latest release
+ *       -> exact ZIP asset for module and semantic version
+ *       -> SHA-256 digest of the complete ZIP
+ *       -> signed .bx-module-manifest.json
+ *       -> SHA-256 digest of every package file
+ *       -> allowed-path policy and installation
  *
- * Concurrent update attempts are prevented with an exclusive non-blocking file
- * lock. Before replacing or removing files, the previous state is copied into a
- * package-specific staging backup. If installation or a later migration fails,
- * the changed files are restored and newly created files are removed.
+ * RELEASE PACKAGE CONTRACT
+ * ========================
+ * Tags use semantic versions such as v1.2.4. The Release contains:
  *
- * Release metadata is cached as JSON below
- * cache/bx_github_updater/<module-name>. Successful installations additionally
- * store the installed manifest there, allowing a later release to identify and
- * safely remove obsolete package files. Administrative callers remain
- * responsible for invoking update operations through a CSRF-protected action and
- * for passing idempotent database migrations when required.
+ *   <module-name>-<version>.zip
+ *   <module-name>-<version>.zip.sha256
  *
- * The class expects the modified constants DIR_FS_CATALOG and TABLE_CONFIGURATION
- * and the standard xtc_db_* helper functions to be available. The caller must
- * also provide a valid semantic version in configuration key
- * MODULE_<PREFIX>_VERSION.
+ * The ZIP is flat and uses portable, shop-relative paths:
  *
- * PHP 8.0 or newer is required. GitHub access additionally requires ext-curl,
- * package installation requires ext-zip, and signed releases require ext-sodium.
+ *   admin/includes/modules/system/example.php
+ *   lang/german/modules/system/example.php
+ *   media/content/example.php
+ *
+ * Its root must also contain:
+ *
+ *   .bx-module-manifest.json
+ *   .bx-module-manifest.sig
+ *
+ * The manifest binds module name, release version and every file hash. The
+ * signature is an Ed25519 detached signature, Base64 encoded, over the exact
+ * manifest bytes. Both files are verified before package files reach the shop.
+ *
+ * SIGNING AND KEY MANAGEMENT
+ * ==========================
+ * The public Ed25519 key is deployment data and may be committed with the
+ * module. It is passed as constructor option "public_key". The matching private
+ * key must NEVER be committed, copied into a release or installed in a shop.
+ *
+ * The GitHub Actions workflow reads the private key from the organization or
+ * repository Actions secret BX_RELEASE_SIGNING_KEY and signs the generated
+ * manifest. One organization-wide key may sign all maintained repositories.
+ *
+ * Public key requirements:
+ * - Base64 format;
+ * - decodes to exactly 32 bytes.
+ *
+ * Private key requirements:
+ * - Base64 format;
+ * - decodes to exactly 64 bytes;
+ * - exists only in secure local/offline storage and GitHub Secrets.
+ *
+ * The ZIP checksum protects transport integrity. Ed25519 proves package
+ * authenticity relative to the signing key. An attacker who only changes release
+ * assets cannot create an installable package. A compromised GitHub maintainer
+ * may still abuse an accessible CI signing secret; therefore workflow permissions,
+ * protected environments, tag rules and required reviewers are also part of the
+ * trust model.
+ *
+ * REQUIRED CONSTRUCTOR CONFIGURATION
+ * =================================
+ * - owner:              GitHub organization or user.
+ * - repo:               GitHub repository name.
+ * - module_name:        package/release prefix; defaults to repo.
+ * - module_prefix:      upper-case modified configuration prefix.
+ * - current_version:    installed semantic version.
+ * - public_key:          Base64-encoded Ed25519 public key; mandatory.
+ * - allowed_paths:       release paths which may be installed or removed.
+ *
+ * Optional configuration:
+ * - admin_dir:             actual admin directory; normally DIR_ADMIN.
+ * - shop_root:             shop root; defaults to DIR_FS_CATALOG.
+ * - cache_dir:             updater state directory.
+ * - github_token:          private-repository token, sent only to GitHub API.
+ * - cache_ttl_seconds:     successful cache lifetime; default 24 hours.
+ * - exclude_paths:         merchant-customized paths never to replace/remove.
+ * - maximum_archive_size
+ * - maximum_extracted_size
+ * - maximum_manifest_size
+ *
+ * ADMIN DIRECTORY MAPPING
+ * =======================
+ * Release paths deliberately retain "admin/" as a portable logical prefix.
+ * The updater maps that prefix to the admin directory selected during modified
+ * installation:
+ *
+ *   admin/includes/modules/system/example.php
+ *       -> admin_1x2y3z/includes/modules/system/example.php
+ *
+ * Manifest and allowed_paths therefore always use "admin/". Catalog paths such
+ * as includes/, lang/ and media/ are not remapped. DIR_ADMIN should be passed as
+ * admin_dir by the module.
+ *
+ * CHECK AND CACHE BEHAVIOUR
+ * =========================
+ * checkForUpdate() requests /repos/<owner>/<repo>/releases/latest. HTTPS, every
+ * redirect target, release version, asset name and repository-specific asset
+ * URL are validated. Successful metadata is cached in:
+ *
+ *   <shop_root>/cache/bx_github_updater/<module_name>/release.json
+ *
+ * Errors use a much shorter cache lifetime, preventing a temporary network
+ * failure or GitHub rate limit from hiding a release for 24 hours. The UI offers
+ * installation only when all three conditions hold: newer version, ZIP URL and
+ * complete SHA-256 digest.
+ *
+ * INSTALLATION FLOW
+ * =================
+ * installLatestUpdate() performs this sequence:
+ *
+ * 1. Verify required extensions and parse the configuration.
+ * 2. Acquire an exclusive, non-blocking per-module lock.
+ * 3. Refresh and validate release metadata.
+ * 4. Download the exact ZIP while enforcing redirect, protocol and byte limits.
+ * 5. Verify the SHA-256 digest of the complete ZIP.
+ * 6. Inspect entries for traversal, absolute paths, links, duplicates and size.
+ * 7. Read the bounded manifest and verify its Ed25519 signature.
+ * 8. Require exact agreement between ZIP entries and manifest entries.
+ * 9. Stream package files into staging and hash them in 64 KiB chunks.
+ * 10. Back up affected files and write a rollback record incrementally.
+ * 11. Install only allowed paths and map the logical admin directory.
+ * 12. Run the optional idempotent database migration callback.
+ * 13. Store the installed manifest and updated module configuration version.
+ * 14. Write a commit marker and audit entry, then invalidate OPcache.
+ * 15. Remove staging only after the committed state has been recorded.
+ *
+ * RECOVERY AND CONCURRENCY
+ * ========================
+ * The lock prevents parallel updates of the same module. Every changed file is
+ * backed up before replacement. Obsolete files are removed only when listed in
+ * the previous installed, re-verified manifest and not excluded. The existing
+ * installed manifest is copied before download or package validation and its
+ * original existence is recorded as had_manifest. Recovery never deletes an
+ * existing manifest unless stage metadata proves that no manifest existed
+ * before the update. Rollback plans, backup names and recovery paths are
+ * validated before use.
+ *
+ * A committed.json marker plus stage metadata distinguishes an interrupted
+ * operation from an already committed update. Recovery therefore cleans a
+ * committed stage without rolling back successfully installed files; an
+ * uncommitted stage is rolled back, including manifest and stored version state.
+ * A compact JSON-lines audit record is appended to update-audit.log.
+ *
+ * A database transaction cannot atomically span filesystem, MySQL DDL and PHP
+ * process lifetime. Migration callbacks must therefore be idempotent, manage
+ * their own DB transactions and tolerate an earlier partial execution.
+ *
+ * SECURITY POLICY
+ * ===============
+ * - HTTPS only with explicit TLS verification.
+ * - Every redirect destination is checked again.
+ * - GitHub token is sent only to api.github.com.
+ * - Repository-specific exact asset names and URLs only.
+ * - No traversal, absolute path, backslash path, duplicate or symlink.
+ * - No undeclared archive file and no write outside allowed_paths.
+ * - Dotfiles, cache paths and sensitive files such as configure.php are denied.
+ * - ZIP download, unpacked total and manifest sizes are bounded.
+ * - Ordinary package files are streamed instead of fully buffered in memory.
+ * - public_key is mandatory; unsigned packages cannot be installed.
+ * - The locally stored installed manifest is re-verified by signature before it
+ *   is allowed to drive obsolete-file deletion.
+ *
+ * CALLER RESPONSIBILITIES
+ * =======================
+ * This class does not inspect the modified admin session or ACL. The caller
+ * must expose update actions only to authenticated administrators, use a
+ * CSRF-protected POST, escape release notes/URLs before HTML output and provide
+ * an idempotent migration callback where needed. A business-critical production
+ * update should additionally have a normal shop/database backup.
+ *
+ * RUNTIME REQUIREMENTS
+ * ====================
+ * - PHP 8.0 or newer.
+ * - ext-curl for API requests and downloads.
+ * - ext-zip for archive validation.
+ * - ext-sodium for Ed25519 signature verification.
+ * - modified DIR_FS_CATALOG and TABLE_CONFIGURATION.
+ * - modified xtc_db_query(), xtc_db_input() and xtc_db_num_rows().
+ * - A writable, protected cache directory.
+ * - A GitHub workflow with protected access to BX_RELEASE_SIGNING_KEY.
+ *
+ * WINDOWS / XAMPP NOTE
+ * ====================
+ * CLI and Apache may load different php.ini files or extension search paths.
+ * Always verify Sodium through the web SAPI. In XAMPP, Apache loads
+ * C:\xampp\php\php.ini; native dependencies may require explicit LoadFile
+ * entries in httpd-xampp.conf. On PHP builds affected by Windows ASLR, configure
+ * opcache.file_cache and opcache.file_cache_fallback as in the current project.
+ * The installer uses a bounded 300-second execution window and a private 0700
+ * staging directory.
  *
  * @package    BX\Github
  * @author     Axel Benkert <mail@bx-coding.de>
@@ -53,6 +208,9 @@ declare(strict_types=1);
  * @link       https://github.com/bx-codemaster/bx-block-contacts
  * @since      1.1.0
  * @requires   PHP >= 8.0
+ * @requires   ext-curl
+ * @requires   ext-zip
+ * @requires   ext-sodium
  *
  * @see        https://docs.github.com/en/rest/releases/releases#get-the-latest-release
  */
@@ -83,6 +241,9 @@ class BxGithubModuleUpdater
     private const MANIFEST_SIGNATURE_FILE = '.bx-module-manifest.sig';
     private const CHECK_CACHE_FILE = 'release.json';
     private const INSTALLED_MANIFEST_FILE = 'installed-manifest.json';
+    private const COMMIT_MARKER_FILE = 'committed.json';
+    private const STAGE_META_FILE = 'stage-meta.json';
+    private const AUDIT_LOG_FILE = 'update-audit.log';
 
     public function __construct(array $config)
     {
@@ -113,7 +274,7 @@ class BxGithubModuleUpdater
             (int) ($config['maximum_extracted_size'] ?? 4 * $this->maximumArchiveSize)
         );
         $publicKey = $config['public_key'] ?? null;
-        $this->publicKey = $publicKey === null || $publicKey === '' ? null : (string) $publicKey;
+        $this->publicKey = is_string($publicKey) ? trim($publicKey) : '';
         $this->excludePaths = array_map(
             static function (string $path): string {
                 return trim(str_replace('\\', '/', $path), '/');
@@ -132,9 +293,9 @@ class BxGithubModuleUpdater
         }
         $this->assertSafeRelativePath($this->adminDirectory, 'Admin directory');
         if (
-            preg_match('/^[A-Za-z0-9._-]+$/', $this->owner) !== 1
-            || preg_match('/^[A-Za-z0-9._-]+$/', $this->repo) !== 1
-            || preg_match('/^[A-Za-z0-9._-]+$/', $this->moduleName) !== 1
+            preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $this->owner) !== 1
+            || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $this->repo) !== 1
+            || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $this->moduleName) !== 1
             || preg_match('/^[A-Z0-9_]+$/', $this->modulePrefix) !== 1
         ) {
             throw new InvalidArgumentException('Repository, module name and module prefix contain invalid characters.');
@@ -170,10 +331,16 @@ class BxGithubModuleUpdater
         if (strpos($normalizedAdminRoot, $normalizedShopRoot . '/') !== 0) {
             throw new InvalidArgumentException('Configured admin directory must be inside shop_root.');
         }
-        if ($this->publicKey !== null) {
-            if (!extension_loaded('sodium') || preg_match('/^[A-Za-z0-9+\/]{43}=$/', $this->publicKey) !== 1) {
-                throw new InvalidArgumentException('public_key must be a base64-encoded Ed25519 public key.');
-            }
+        if ($this->publicKey === '') {
+            throw new InvalidArgumentException('public_key is required.');
+        }
+        $decodedPublicKey = base64_decode($this->publicKey, true);
+        if (
+            $decodedPublicKey === false
+            || strlen($decodedPublicKey) !== 32
+            || base64_encode($decodedPublicKey) !== $this->publicKey
+        ) {
+            throw new InvalidArgumentException('public_key must be a base64-encoded Ed25519 public key.');
         }
     }
 
@@ -193,9 +360,25 @@ class BxGithubModuleUpdater
                 && isset($cached['latest_version'])
             ) {
                 $latestVersion = $this->normalizeVersion((string) $cached['latest_version']);
-                $cached['has_update'] = $this->isNewer($latestVersion, $this->currentVersion);
+                if (
+                    !empty($cached['zip_url'])
+                    && !$this->isExpectedAssetUrl(
+                        (string) $cached['zip_url'],
+                        sprintf('%s-%s.zip', $this->moduleName, $latestVersion)
+                    )
+                ) {
+                    $cached['zip_url'] = null;
+                    $cached['has_update'] = false;
+                    $cached['error'] = 'Gecachte ZIP-URL ist nicht gültig.';
+                }
+                if (!empty($cached['html_url'])) {
+                    $cached['html_url'] = $this->safeGithubReleaseUrl($cached['html_url']);
+                }
+                $cached['has_update'] = empty($cached['error'])
+                    && !empty($cached['zip_url'])
+                    && $this->isNewer($latestVersion, $this->currentVersion);
                 $cached['current_version'] = $this->currentVersion;
-                return $cached + $this->emptyStatus();
+                return array_merge($this->emptyStatus(), $cached);
             }
         }
 
@@ -219,6 +402,9 @@ class BxGithubModuleUpdater
      */
     public function installLatestUpdate(?callable $migration = null): array
     {
+        if (!extension_loaded('sodium')) {
+            return ['ok' => false, 'message' => 'Die PHP-Erweiterung sodium ist für signierte Updates nicht verfügbar.'];
+        }
         if (!extension_loaded('curl')) {
             return ['ok' => false, 'message' => 'Die PHP-Erweiterung cURL ist nicht verfügbar.'];
         }
@@ -226,7 +412,11 @@ class BxGithubModuleUpdater
             return ['ok' => false, 'message' => 'Die PHP-Erweiterung ZipArchive ist nicht verfügbar.'];
         }
 
-        $this->protectCacheDirectory();
+        try {
+            $this->protectCacheDirectory();
+        } catch (Throwable $exception) {
+            return ['ok' => false, 'message' => 'Das Update-Verzeichnis konnte nicht vorbereitet werden.'];
+        }
         $lockHandle = fopen($this->cacheDir . '/update.lock', 'c');
         if ($lockHandle === false || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
             if (is_resource($lockHandle)) {
@@ -238,7 +428,7 @@ class BxGithubModuleUpdater
         $stageDir = '';
         try {
             $this->recoverStaleStages();
-            set_time_limit(0);
+            set_time_limit(300);
             ignore_user_abort(true);
             $status = $this->checkForUpdate(true);
             if ($status['error'] !== null) {
@@ -257,7 +447,19 @@ class BxGithubModuleUpdater
             $stageDir = $this->cacheDir . '/stage-' . bin2hex(random_bytes(8));
             $extractDir = $stageDir . '/extracted';
             $zipFile = $stageDir . '/release.zip';
-            $this->ensureDirectory($extractDir);
+            $this->ensureDirectory($extractDir, 0700);
+
+            $installedManifestPath = $this->cacheDir . '/' . self::INSTALLED_MANIFEST_FILE;
+            $previousManifestPath = $stageDir . '/previous-installed-manifest.json';
+            $hadInstalledManifest = is_file($installedManifestPath);
+            if ($hadInstalledManifest && !copy($installedManifestPath, $previousManifestPath)) {
+                throw new RuntimeException('Das vorhandene Modulmanifest konnte nicht gesichert werden.');
+            }
+            $this->writeJsonAtomically($stageDir . '/' . self::STAGE_META_FILE, [
+                'from_version' => $this->currentVersion,
+                'version' => $status['latest_version'],
+                'had_manifest' => $hadInstalledManifest,
+            ]);
 
             $this->downloadFile($status['zip_url'], $zipFile);
             $actualHash = strtolower((string) hash_file('sha256', $zipFile));
@@ -271,38 +473,38 @@ class BxGithubModuleUpdater
                 $this->moduleName,
                 $status['latest_version']
             );
+            $this->writeJsonAtomically($stageDir . '/' . self::STAGE_META_FILE, [
+                'from_version' => $this->currentVersion,
+                'version' => $status['latest_version'],
+                'had_manifest' => $hadInstalledManifest,
+                'zip_sha256' => (string) $status['sha256'],
+                'manifest_sha256' => hash('sha256', $manifest['manifest_json']),
+            ]);
             $changedFiles = $this->applyPackage($extractDir, $manifest, $stageDir);
 
             if ($migration !== null) {
                 $migration($this->currentVersion, $status['latest_version']);
             }
 
-            $installedManifestPath = $this->cacheDir . '/' . self::INSTALLED_MANIFEST_FILE;
-            $previousManifestPath = $stageDir . '/previous-installed-manifest.json';
-            if (is_file($installedManifestPath)) {
-                if (!copy($installedManifestPath, $previousManifestPath)) {
-                    throw new RuntimeException('Das vorhandene Modulmanifest konnte nicht gesichert werden.');
-                }
-            }
             $this->writeJsonAtomically(
                 $installedManifestPath,
-                $manifest
+                [
+                    'manifest' => $manifest,
+                    'raw' => $manifest['manifest_json'],
+                    'signature' => $manifest['manifest_signature'],
+                ]
             );
-            try {
-                $this->setInstalledVersion($status['latest_version']);
-            } catch (Throwable $exception) {
-                if (is_file($previousManifestPath)) {
-                    $this->writeJsonAtomically(
-                        $installedManifestPath,
-                        json_decode((string) file_get_contents($previousManifestPath), true)
-                    );
-                } else {
-                    $this->removePath($installedManifestPath);
-                }
-                throw $exception;
-            }
+            $this->setInstalledVersion($status['latest_version']);
             $this->currentVersion = $status['latest_version'];
+            $this->writeJsonAtomically($stageDir . '/' . self::COMMIT_MARKER_FILE, [
+                'version' => $status['latest_version'],
+                'zip_sha256' => (string) $status['sha256'],
+                'committed_at' => time(),
+            ]);
+            $this->currentVersion = $status['latest_version'];
+            $this->markStageCommitted($stageDir);
             $this->removePath($this->cacheFilePath());
+            $this->writeAuditEntry(true, $this->currentVersion, (string) $status['sha256'], $changedFiles);
 
             return [
                 'ok' => true,
@@ -315,16 +517,43 @@ class BxGithubModuleUpdater
             ];
         } catch (Throwable $exception) {
             $rollbackErrors = [];
-            if ($stageDir !== '') {
+            $committed = $stageDir !== '' && $this->isCommittedStage($stageDir);
+            if (!$committed && $stageDir !== '') {
                 $rollbackErrors = $this->rollback($stageDir);
+                $rollbackErrors = array_merge($rollbackErrors, $this->restoreStageMetadata($stageDir));
             }
             $message = $exception->getMessage();
             if ($rollbackErrors !== []) {
                 $message .= ' Rollback unvollständig: ' . implode(' ', $rollbackErrors);
             }
+            if (!$committed) {
+                $this->writeAuditEntry(
+                    false,
+                    $this->getLatestVersionFromMeta($stageDir),
+                    '',
+                    0,
+                    $message
+                );
+            }
+            if ($committed) {
+                $this->writeAuditEntry(
+                    true,
+                    $this->getLatestVersionFromMeta($stageDir),
+                    '',
+                    0,
+                    'Commit abgeschlossen; Cleanup ergab einen Fehler.'
+                );
+                return [
+                    'ok' => true,
+                    'message' => 'Update abgeschlossen. Die temporäre Bereinigung wird beim nächsten Lauf fortgesetzt.',
+                    'version' => $this->getLatestVersionFromMeta($stageDir),
+                ];
+            }
             return ['ok' => false, 'message' => $message];
         } finally {
-            if ($stageDir !== '') {
+            if ($stageDir !== '' && $this->isCommittedStage($stageDir)) {
+                $this->removeStageAfterCommit($stageDir);
+            } elseif ($stageDir !== '') {
                 $this->removeTree($stageDir);
             }
             flock($lockHandle, LOCK_UN);
@@ -371,12 +600,18 @@ class BxGithubModuleUpdater
             $name = (string) ($asset['name'] ?? '');
             $assetUrl = (string) ($asset['url'] ?? $asset['browser_download_url'] ?? '');
             if ($name === $expectedZipName) {
+                if (!$this->isExpectedAssetUrl($assetUrl, $expectedZipName)) {
+                    return $this->emptyStatus('Release-ZIP gehört nicht zum erwarteten Repository.');
+                }
                 $zipUrl = $assetUrl;
                 $digest = (string) ($asset['digest'] ?? '');
                 if (preg_match('/^sha256:([a-f0-9]{64})$/i', $digest, $match)) {
                     $sha256 = strtolower($match[1]);
                 }
             } elseif ($name === $expectedShaName) {
+                if (!$this->isExpectedAssetUrl($assetUrl, $expectedShaName)) {
+                    return $this->emptyStatus('Prüfsummen-Asset gehört nicht zum erwarteten Repository.');
+                }
                 $shaAssetUrl = $assetUrl;
             }
         }
@@ -474,7 +709,8 @@ class BxGithubModuleUpdater
             if (!is_string($manifestContent) || strlen($manifestContent) !== (int) $manifestStat['size']) {
                 throw new RuntimeException('Das Modulmanifest ist ungültig oder zu groß.');
             }
-            if ($this->publicKey !== null) {
+            $signature = '';
+            {
                 $signatureStat = $zip->statName(self::MANIFEST_SIGNATURE_FILE);
                 if (
                     !is_array($signatureStat)
@@ -483,15 +719,17 @@ class BxGithubModuleUpdater
                 ) {
                     throw new RuntimeException('Die Manifest-Signatur fehlt oder ist zu groß.');
                 }
-                $signature = $zip->getFromName(self::MANIFEST_SIGNATURE_FILE);
-                if (!is_string($signature) || strlen($signature) !== (int) $signatureStat['size']) {
+                $signatureContent = $zip->getFromName(self::MANIFEST_SIGNATURE_FILE);
+                if (!is_string($signatureContent) || strlen($signatureContent) !== (int) $signatureStat['size']) {
                     throw new RuntimeException('Die Manifest-Signatur fehlt.');
                 }
+                $signature = trim($signatureContent);
                 $publicKey = base64_decode($this->publicKey, true);
                 $decodedSignature = base64_decode(trim($signature), true);
                 if (
                     !is_string($publicKey)
                     || !is_string($decodedSignature)
+                    || strlen($decodedSignature) !== SODIUM_CRYPTO_SIGN_BYTES
                     || !sodium_crypto_sign_verify_detached($decodedSignature, $manifestContent, $publicKey)
                 ) {
                     throw new RuntimeException('Die Manifest-Signatur ist ungültig.');
@@ -595,10 +833,26 @@ class BxGithubModuleUpdater
                 'module' => $moduleName,
                 'version' => $version,
                 'files' => $files,
+                'manifest_json' => $manifestContent,
+                'manifest_signature' => $signature,
             ];
         } finally {
             $zip->close();
         }
+    }
+
+    private function verifyManifestSignature(string $manifest, string $signature): bool
+    {
+        if (!extension_loaded('sodium')) {
+            return false;
+        }
+        $publicKey = base64_decode($this->publicKey, true);
+        $decodedSignature = base64_decode(trim($signature), true);
+        return is_string($publicKey)
+            && strlen($publicKey) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES
+            && is_string($decodedSignature)
+            && strlen($decodedSignature) === SODIUM_CRYPTO_SIGN_BYTES
+            && sodium_crypto_sign_verify_detached($decodedSignature, $manifest, $publicKey);
     }
 
     /**
@@ -617,7 +871,11 @@ class BxGithubModuleUpdater
             $oldFiles = $oldManifest['files'] ?? [];
 
             foreach (array_keys($oldFiles) as $oldPath) {
-                if (!isset($manifest['files'][$oldPath]) && !$this->isExcluded($oldPath)) {
+                if (
+                    !isset($manifest['files'][$oldPath])
+                    && $this->isAllowed((string) $oldPath)
+                    && !$this->isExcluded((string) $oldPath)
+                ) {
                     $target = $this->safeTargetPath($oldPath);
                     $this->backupTarget(
                         $target,
@@ -662,6 +920,11 @@ class BxGithubModuleUpdater
                 if (!copy($source, $temporaryTarget)) {
                     throw new RuntimeException('Datei konnte nicht vorbereitet werden: ' . $path);
                 }
+                $temporaryHash = hash_file('sha256', $temporaryTarget);
+                if (!is_string($temporaryHash) || !hash_equals($hash, $temporaryHash)) {
+                    @unlink($temporaryTarget);
+                    throw new RuntimeException('Vorbereitete Datei wurde verändert: ' . $path);
+                }
                 if (!rename($temporaryTarget, $target)) {
                     if (is_file($target) && !unlink($target)) {
                         @unlink($temporaryTarget);
@@ -704,10 +967,18 @@ class BxGithubModuleUpdater
                 continue;
             }
             try {
-                $target = $this->safeTargetPath((string) $entry['path']);
+                $path = (string) $entry['path'];
+                if (!$this->isAllowed($path) || $this->isExcluded($path)) {
+                    throw new RuntimeException('Rollback-Pfad ist nicht erlaubt: ' . $path);
+                }
+                $target = $this->safeTargetPath($path);
                 if (!empty($entry['existed'])) {
                     $this->ensureDirectory(dirname($target));
-                    $backup = $backupDir . '/' . $entry['backup'];
+                    $backupName = (string) ($entry['backup'] ?? '');
+                    if (preg_match('/^[a-f0-9]{16}$/', $backupName) !== 1) {
+                        throw new RuntimeException('Sicherungsdateiname ist ungültig.');
+                    }
+                    $backup = $backupDir . '/' . $backupName;
                     if (is_file($backup)) {
                         if (is_file($target)) {
                             if (!unlink($target)) {
@@ -771,8 +1042,35 @@ class BxGithubModuleUpdater
         if (!is_file($path)) {
             return [];
         }
-        $manifest = json_decode((string) file_get_contents($path), true);
-        return is_array($manifest) ? $manifest : [];
+        $stored = json_decode((string) file_get_contents($path), true);
+        if (
+            !is_array($stored)
+            || !is_string($stored['raw'] ?? null)
+            || !is_string($stored['signature'] ?? null)
+            || !$this->verifyManifestSignature($stored['raw'], $stored['signature'])
+        ) {
+            return [];
+        }
+        $manifest = json_decode($stored['raw'], true);
+        if (
+            !is_array($manifest)
+            || ($manifest['module'] ?? '') !== $this->moduleName
+            || !is_array($manifest['files'] ?? null)
+        ) {
+            return [];
+        }
+        foreach ($manifest['files'] as $pathValue => $hash) {
+            if (
+                !is_string($pathValue)
+                || !is_string($hash)
+                || preg_match('/^[a-f0-9]{64}$/i', $hash) !== 1
+                || !$this->isAllowed($pathValue)
+                || $this->isExcluded($pathValue)
+            ) {
+                return [];
+            }
+        }
+        return $manifest;
     }
 
     private function setInstalledVersion(string $version): void
@@ -834,7 +1132,18 @@ class BxGithubModuleUpdater
         }
         $trimmed = rtrim($path, '/');
         foreach (explode('/', $trimmed) as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
+            $windowsReserved = preg_match(
+                '/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i',
+                $segment
+            ) === 1;
+            if (
+                $segment === ''
+                || $segment === '.'
+                || $segment === '..'
+                || strpos($segment, ':') !== false
+                || $segment !== rtrim($segment, " .")
+                || $windowsReserved
+            ) {
                 throw new RuntimeException($label . ' ist nicht sicher: ' . $path);
             }
         }
@@ -850,8 +1159,18 @@ class BxGithubModuleUpdater
             if ($handle === false) {
                 throw new RuntimeException('cURL konnte nicht initialisiert werden.');
             }
+            $responseBody = '';
+            $headers = '';
             curl_setopt_array($handle, [
-                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_RETURNTRANSFER => false,
+                CURLOPT_WRITEFUNCTION => function ($curlHandle, string $chunk) use (&$responseBody): int {
+                    $length = strlen($chunk);
+                    if (strlen($responseBody) + $length > 1024 * 1024) {
+                        return 0;
+                    }
+                    $responseBody .= $chunk;
+                    return $length;
+                },
                 CURLOPT_FOLLOWLOCATION => false,
                 CURLOPT_CONNECTTIMEOUT => 5,
                 CURLOPT_TIMEOUT => 15,
@@ -861,18 +1180,20 @@ class BxGithubModuleUpdater
                 CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_SSL_VERIFYHOST => 2,
                 CURLOPT_UNRESTRICTED_AUTH => false,
-                CURLOPT_HEADER => true,
+                CURLOPT_HEADER => false,
+                CURLOPT_HEADERFUNCTION => static function ($curlHandle, string $header) use (&$headers): int {
+                    $headers .= $header;
+                    return strlen($header);
+                },
             ]);
             $response = curl_exec($handle);
             $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
-            $headerSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
             $error = (string) curl_error($handle);
             curl_close($handle);
-            if (!is_string($response)) {
+            if ($response === false) {
                 throw new RuntimeException($error !== '' ? $error : 'GitHub-Antwort konnte nicht gelesen werden.');
             }
-            $headers = substr($response, 0, $headerSize);
-            $body = substr($response, $headerSize);
+            $body = $responseBody;
             if (in_array($status, [301, 302, 303, 307, 308], true)) {
                 if (!preg_match('/^Location:\s*(.+)$/mi', $headers, $match)) {
                     throw new RuntimeException('GitHub-Redirect ohne Ziel.');
@@ -891,6 +1212,7 @@ class BxGithubModuleUpdater
     private function downloadFile(string $url, string $destination): void
     {
         $currentUrl = $url;
+        $downloadedBytes = 0;
         for ($attempt = 0; $attempt < 4; $attempt++) {
             $this->assertGithubUrl($currentUrl);
             $file = fopen($destination, 'wb');
@@ -985,8 +1307,9 @@ class BxGithubModuleUpdater
 
     private function assertGithubUrl(string $url): void
     {
-        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $parts = parse_url($url);
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
         if (
             $scheme !== 'https'
             || !in_array($host, [
@@ -995,9 +1318,32 @@ class BxGithubModuleUpdater
                 'objects.githubusercontent.com',
                 'release-assets.githubusercontent.com',
             ], true)
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || (isset($parts['port']) && (int) $parts['port'] !== 443)
         ) {
             throw new RuntimeException('Unerwartete Download-URL von GitHub.');
         }
+    }
+
+    private function isExpectedAssetUrl(string $url, string $expectedAssetName): bool
+    {
+        try {
+            $this->assertGithubUrl($url);
+        } catch (Throwable $exception) {
+            return false;
+        }
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+        $repository = preg_quote(rawurlencode($this->owner) . '/' . rawurlencode($this->repo), '#');
+        $asset = preg_quote(rawurlencode($expectedAssetName), '#');
+        if ($host === 'api.github.com') {
+            return preg_match('#^/repos/' . $repository . '/releases/assets/[0-9]+$#i', $path) === 1;
+        }
+        return preg_match(
+            '#^/' . $repository . '/releases/download/v?[^/]+/' . $asset . '$#i',
+            $path
+        ) === 1;
     }
 
     private function resolveRedirectUrl(string $baseUrl, string $location): string
@@ -1047,8 +1393,13 @@ class BxGithubModuleUpdater
 
     private function isExcluded(string $path): bool
     {
+        $normalizedPath = strtolower($path);
         foreach ($this->excludePaths as $excluded) {
-            if ($path === $excluded || strpos($path, $excluded . '/') === 0) {
+            $normalizedExcluded = strtolower($excluded);
+            if (
+                $normalizedPath === $normalizedExcluded
+                || strpos($normalizedPath, $normalizedExcluded . '/') === 0
+            ) {
                 return true;
             }
         }
@@ -1057,6 +1408,7 @@ class BxGithubModuleUpdater
 
     private function isAllowed(string $path): bool
     {
+        $normalizedPath = strtolower($path);
         if (
             substr(basename($path), 0, 1) === '.'
             || strpos($path, '/.') !== false
@@ -1068,7 +1420,11 @@ class BxGithubModuleUpdater
             return false;
         }
         foreach ($this->allowedPaths as $allowedPath) {
-            if ($path === $allowedPath || strpos($path, $allowedPath . '/') === 0) {
+            $normalizedAllowed = strtolower($allowedPath);
+            if (
+                $normalizedPath === $normalizedAllowed
+                || strpos($normalizedPath, $normalizedAllowed . '/') === 0
+            ) {
                 return true;
             }
         }
@@ -1146,12 +1502,12 @@ class BxGithubModuleUpdater
         }
     }
 
-    private function ensureDirectory(string $path): void
+    private function ensureDirectory(string $path, int $mode = 0755): void
     {
         if (is_dir($path)) {
             return;
         }
-        if (!mkdir($path, 0755, true) && !is_dir($path)) {
+        if (!mkdir($path, $mode, true) && !is_dir($path)) {
             throw new RuntimeException('Verzeichnis konnte nicht angelegt werden: ' . basename($path));
         }
     }
@@ -1173,7 +1529,7 @@ class BxGithubModuleUpdater
         }
     }
 
-    private function safeGithubReleaseUrl($url): ?string
+    private function safeGithubReleaseUrl(mixed $url): ?string
     {
         if (!is_string($url) || !filter_var($url, FILTER_VALIDATE_URL)) {
             return null;
@@ -1187,6 +1543,11 @@ class BxGithubModuleUpdater
 
     private function recoverStaleStages(): void
     {
+        foreach ((array) glob($this->cacheDir . '/trash-*') as $trashDir) {
+            if (is_dir($trashDir) && !is_link($trashDir)) {
+                $this->removeTree($trashDir);
+            }
+        }
         $entries = glob($this->cacheDir . '/stage-*');
         if (!is_array($entries)) {
             return;
@@ -1195,7 +1556,12 @@ class BxGithubModuleUpdater
             if (!is_dir($stageDir)) {
                 continue;
             }
+            if ($this->isCommittedStage($stageDir)) {
+                $this->removeStageAfterCommit($stageDir);
+                continue;
+            }
             $errors = $this->rollback($stageDir);
+            $errors = array_merge($errors, $this->restoreStageMetadata($stageDir));
             if ($errors !== []) {
                 throw new RuntimeException(
                     'Ein vorheriger Updatevorgang konnte nicht vollständig wiederhergestellt werden. '
@@ -1203,6 +1569,138 @@ class BxGithubModuleUpdater
                 );
             }
             $this->removeTree($stageDir);
+        }
+    }
+
+    private function isCommittedStage(string $stageDir): bool
+    {
+        $markerPath = $stageDir . '/' . self::COMMIT_MARKER_FILE;
+        if (!is_file($markerPath)) {
+            return false;
+        }
+        $marker = json_decode((string) file_get_contents($markerPath), true);
+        return is_array($marker)
+            && is_string($marker['version'] ?? null)
+            && (string) $marker['version'] === $this->readInstalledVersion();
+    }
+
+    private function markStageCommitted(string $stageDir): void
+    {
+        $trashDir = dirname($stageDir) . '/trash-' . substr(basename($stageDir), strlen('stage-'));
+        if (!rename($stageDir, $trashDir)) {
+            throw new RuntimeException('Committed Stage konnte nicht in den Cleanup-Bereich verschoben werden.');
+        }
+        $this->removeTree($trashDir);
+    }
+
+    private function removeStageAfterCommit(string $stageDir): void
+    {
+        $trashDir = dirname($stageDir) . '/trash-' . substr(basename($stageDir), strlen('stage-'));
+        if (is_dir($stageDir) && !rename($stageDir, $trashDir)) {
+            return;
+        }
+        $this->removeTree($trashDir);
+    }
+
+    private function readInstalledVersion(): string
+    {
+        $key = xtc_db_input('MODULE_' . $this->modulePrefix . '_VERSION');
+        $query = xtc_db_query(
+            "SELECT configuration_value FROM " . TABLE_CONFIGURATION
+            . " WHERE configuration_key = '" . $key . "' LIMIT 1"
+        );
+        if (!$query || xtc_db_num_rows($query) < 1) {
+            return '';
+        }
+        $row = xtc_db_fetch_array($query);
+        return (string) ($row['configuration_value'] ?? '');
+    }
+
+    private function getLatestVersionFromMeta(string $stageDir): string
+    {
+        $path = $stageDir . '/' . self::STAGE_META_FILE;
+        $meta = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
+        return is_array($meta) ? (string) ($meta['version'] ?? '') : $this->currentVersion;
+    }
+
+    private function restoreStageMetadata(string $stageDir): array
+    {
+        $metaPath = $stageDir . '/' . self::STAGE_META_FILE;
+        if (!is_file($metaPath)) {
+            return [];
+        }
+        $meta = json_decode((string) file_get_contents($metaPath), true);
+        if (!is_array($meta)) {
+            return ['Stage-Metadaten konnten nicht gelesen werden.'];
+        }
+        $errors = [];
+        $installedPath = $this->cacheDir . '/' . self::INSTALLED_MANIFEST_FILE;
+        $previousPath = $stageDir . '/previous-installed-manifest.json';
+        try {
+            if (!array_key_exists('had_manifest', $meta)) {
+                throw new RuntimeException(
+                    'Der Manifest-Ausgangszustand ist unbekannt; vorhandenes Manifest bleibt unverändert.'
+                );
+            }
+            if ((bool) $meta['had_manifest']) {
+                if (!is_file($previousPath)) {
+                    throw new RuntimeException('Sicherung des installierten Manifests fehlt.');
+                }
+                $previous = json_decode((string) file_get_contents($previousPath), true);
+                if (!is_array($previous)) {
+                    throw new RuntimeException('Sicherung des installierten Manifests ist ungültig.');
+                }
+                $this->writeJsonAtomically($installedPath, $previous);
+            } elseif (is_file($installedPath)) {
+                if (!unlink($installedPath)) {
+                    throw new RuntimeException('Neu angelegtes Manifest konnte nicht entfernt werden.');
+                }
+            }
+        } catch (Throwable $exception) {
+            $errors[] = 'Manifest: ' . $exception->getMessage();
+        }
+        try {
+            $fromVersion = (string) ($meta['from_version'] ?? '');
+            $toVersion = (string) ($meta['version'] ?? '');
+            if (
+                $fromVersion !== ''
+                && $toVersion !== ''
+                && $this->readInstalledVersion() === $toVersion
+            ) {
+                $this->setInstalledVersion($fromVersion);
+            }
+        } catch (Throwable $exception) {
+            $errors[] = 'Version: ' . $exception->getMessage();
+        }
+        return $errors;
+    }
+
+    private function writeAuditEntry(
+        bool $success,
+        string $version,
+        string $zipHash,
+        int $changedFiles,
+        string $error = ''
+    ): void {
+        try {
+            $entry = [
+                'timestamp' => date(DATE_ATOM),
+                'success' => $success,
+                'version' => $version,
+                'zip_sha256' => $zipHash,
+                'changed_files' => $changedFiles,
+                'error' => $error,
+            ];
+            $json = json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if (is_string($json)) {
+                file_put_contents(
+                    $this->cacheDir . '/' . self::AUDIT_LOG_FILE,
+                    $json . PHP_EOL,
+                    FILE_APPEND | LOCK_EX
+                );
+            }
+        } catch (Throwable $exception) {
+            // Audit data must not turn a completed update into a failed one.
         }
     }
 
