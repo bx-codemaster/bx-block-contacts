@@ -4,9 +4,9 @@
         "shop-root": {
             "hashes": {
                 "/admin/images/icons/heading/bx_block_contacts.png": "97322f2f06dc62a830a8f0419fa3b34b",
-                "/admin/includes/classes/BX/Github/BxGithubModuleUpdater.php": "9918bab4e9f715c87f7bc6f93614a976",
+                "/admin/includes/classes/BX/Github/BxGithubModuleUpdater.php": "665757d931298543676b1951319d0a8a",
                 "/admin/includes/extra/functions/bx_block_contacts.php": "48c03d082a19473cfc41758b2b805caa",
-                "/admin/includes/modules/system/bx_block_contacts.php": "48ed245c88aa2cbe5fc4c19726a5019e",
+                "/admin/includes/modules/system/bx_block_contacts.php": "949e0523164d0ab620d3de74902041f4",
                 "/lang/english/extra/admin/bx_block_contacts.php": "651812b75bff987848bb78bcefb5afc5",
                 "/lang/english/modules/system/bx_block_contacts.php": "c713ecb5adca3ad053477393a4e6f452",
                 "/lang/german/extra/admin/bx_block_contacts.php": "4e4cae51a3fdd72d671a6d39745c29af",

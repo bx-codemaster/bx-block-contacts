@@ -1,20 +1,54 @@
 <?php
-/* -----------------------------------------------------------------------------------------
-   $Id: admin/includes/modules/system/bx_block_contacts.php 1000 2022-05-5221 13:00:00Z benax $
-    _                           
-   | |__   ___ _ __   __ ___  __
-   | '_ \ / _ \ '_ \ / _ \ \/ /
-   | |_) |  __/ | | | (_| |>  < 
-   |_.__/ \___|_| |_|\__,_/_/\_\
-   xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-   modified eCommerce Shopsoftware
-   http://www.modified-shop.org
+declare(strict_types=1);
 
-   Copyright (c) 2009 - 2013 [www.modified-shop.org]
-   -----------------------------------------------------------------------------------------
-   Released under the GNU General Public License
-   ---------------------------------------------------------------------------------------*/
+/**
+ * BX Block Contacts system module for modified eCommerce.
+ *
+ * Provides the administrative configuration for blocking contact-form messages
+ * by complete email address, domain, or local part. The module can store and
+ * manage multiple blocked values and exposes the configured values to the
+ * storefront contact-form integration.
+ *
+ * In addition, this module provides a self-contained update mechanism based on
+ * GitHub Releases. On the admin module overview and edit page, the latest release
+ * is checked at configurable intervals and an update is offered when its semantic
+ * version is newer than the installed module version. Release checks are cached;
+ * GitHub and external module servers are not contacted on every request.
+ *
+ * Before an update is installed, the updater performs the following checks:
+ * - The release tag and package name must contain a valid semantic version.
+ * - The archive must be the exact module asset belonging to that version.
+ * - The SHA-256 checksum of the complete ZIP archive must match.
+ * - The package must contain a BX module manifest.
+ * - Every manifest file must match its recorded SHA-256 checksum.
+ * - ZIP paths, symbolic links, file counts and archive sizes must be safe.
+ *
+ * File changes are protected by an exclusive update lock and a backup-based
+ * rollback plan. Files removed from a newer package are deleted when they were
+ * registered by the preceding installed manifest. Update execution is performed
+ * only through the modified admin interface, where the form is protected by the
+ * shop's standard CSRF token mechanism.
+ *
+ * Release archives are created by the GitHub Actions workflow shipped with the
+ * module. They contain the files below the configured source directory at archive
+ * root level plus a generated .bx-module-manifest.json file. The updater is
+ * independent of MMLC and can therefore also be used by manually installed
+ * modules.
+ *
+ * PHP 8.0 or newer and the cURL and ZipArchive extensions are required for the
+ * online update functionality. Normal module operation remains independent from
+ * GitHub once the release status has been cached.
+ *
+ * @package    BX\BlockContacts
+ * @version    1.1.0
+ * @author     Axel Benkert <info@bx-coding.de>
+ * @copyright  2009-present modified eCommerce contributors
+ * @license    GNU General Public License, version 2 or later
+ * @link       https://github.com/bx-codemaster/bx-block-contacts
+ * @since      1.0.0
+ * @requires   PHP >= 8.0
+ */
 
 defined( '_VALID_XTC' ) or die( 'Direct Access to this location is not allowed.' );
 
@@ -55,7 +89,7 @@ class bx_block_contacts {
         );
       }
     }
-   }
+  }
 
   public function process(): never {
     if (($_POST['bx_updater_action'] ?? '') === 'install') {
@@ -169,7 +203,7 @@ class bx_block_contacts {
       $check_query = xtc_db_query("SELECT configuration_value 
                                      FROM ".TABLE_CONFIGURATION."
                                     WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_STATUS'");
-      $this->_check = xtc_db_num_rows($check_query);
+      $this->_check = xtc_db_num_rows($check_query) > 0;
     }
     return $this->_check;
   }
@@ -304,183 +338,196 @@ class bx_block_contacts {
     return $key;
   }
 
-    public function custom(): void {
-      if (($_POST['bx_updater_action'] ?? '') === 'install') {
-        global $messageStack;
-        $result = $this->getGithubUpdater()->installLatestUpdate();
-        $messageStack->add_session($result['message'], $result['ok'] ? 'success' : 'error');
-        return;
-      }
-
-      if (($_GET['delete'] ?? '') !== 'true') {
-        return;
-      }
-
+  public function custom(): void {
+    if (($_POST['bx_updater_action'] ?? '') === 'install') {
       global $messageStack;
-      $result = true;
-        
-      // Dateien definieren
-      $dirs_and_files   = array();
+      $result = $this->getGithubUpdater()->installLatestUpdate();
+      $messageStack->add_session($result['message'], $result['ok'] ? 'success' : 'error');
+      return;
+    }
 
-			$dirs_and_files[] = DIR_FS_ADMIN . 'images/icons/heading/bx_block_contacts.png';
-			$dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/functions/bx_block_contacts.php';
-			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/extra/admin/bx_block_contacts.php';
-			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/modules/system/bx_block_contacts.php';
-			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/extra/admin/bx_block_contacts.php';
-			$dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/modules/system/bx_block_contacts.php';
-			$dirs_and_files[] = DIR_FS_CATALOG . 'media/content/bx_block_contacts.php';
+    if (($_GET['delete'] ?? '') !== 'true') {
+      return;
+    }
 
-      // Dateien löschen
-      foreach ($dirs_and_files as $dir_or_file) {
-        if (!$this->secureDelete($dir_or_file)) {
-          $messageStack->add_session($dir_or_file.MODULE_BX_BLOCK_CONTACTS_TEXT_COULD_NOT_BE_DELETED, 'error');
-          $result = false;
+    global $messageStack;
+    $result = true;
+      
+    // Dateien definieren
+    $dirs_and_files   = array();
+
+    $dirs_and_files[] = DIR_FS_ADMIN . 'images/icons/heading/bx_block_contacts.png';
+    $dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/functions/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/extra/admin/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/modules/system/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/extra/admin/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/modules/system/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'media/content/bx_block_contacts.php';
+
+    // Dateien löschen
+    foreach ($dirs_and_files as $dir_or_file) {
+      if (!$this->secureDelete($dir_or_file)) {
+        $messageStack->add_session($dir_or_file.MODULE_BX_BLOCK_CONTACTS_TEXT_COULD_NOT_BE_DELETED, 'error');
+        $result = false;
+      }
+    }
+      
+    if ($result === true) {
+      $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_SUCCESSFULLY_REMOVED, 'success');
+    } else {
+      $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_REMOVAL_INCOMPLETE, 'error');
+    }
+      
+    // Datei selbst löschen
+    $this->secureDelete(DIR_FS_ADMIN.'includes/modules/system/bx_block_contacts.php');
+
+    xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system'));
+  }
+
+  private function getGithubUpdater(): BxGithubModuleUpdater
+  {
+    if ($this->githubUpdater === null) {
+      $this->githubUpdater = new BxGithubModuleUpdater(array(
+        'owner'           => 'bx-codemaster',
+        'repo'            => 'bx-block-contacts',
+        'module_name'     => 'bx-block-contacts',
+        'module_prefix'   => 'BX_BLOCK_CONTACTS',
+        'admin_dir'       => DIR_ADMIN,
+        'public_key'      => 'RhVqKVDgRLHueQs0eYZBgbhU++wzMY5XETzYL+z5q3A=',
+        'allowed_paths' => array(
+          'admin/includes/classes/BX/Github',
+          'admin/includes/extra/functions',
+          'admin/includes/modules/system',
+          'admin/images/icons/heading',
+          'lang/english/extra/admin',
+          'lang/english/modules/system',
+          'lang/german/extra/admin',
+          'lang/german/modules/system',
+          'media/content',
+        ),
+        'current_version' => version_compare(
+          $this->version,
+          MODULE_BX_BLOCK_CONTACTS_VERSION,
+          '>'
+        ) ? $this->version : MODULE_BX_BLOCK_CONTACTS_VERSION,
+      ));
+    }
+    return $this->githubUpdater;
+  }
+
+  private function createUpdateButton(string $version, bool $standaloneForm): string
+  {
+    $formStart   = '';
+    $formEnd     = '';
+    $actionField = ' name="bx_updater_action" value="install"';
+    if ($standaloneForm) {
+      $formStart = xtc_draw_form(
+        'bx_block_contacts_update',
+        FILENAME_MODULE_EXPORT,
+        'set=system&module=' . $this->code . '&action=custom'
+      );
+      $formEnd = '</form>';
+      $actionField = '';
+    }
+
+    return $formStart
+      . ($standaloneForm ? xtc_draw_hidden_field('bx_updater_action', 'install') : '')
+      . '<button type="submit"' . $actionField . ' class="button btnbox" onclick="return confirm(\''
+      . sprintf(
+        MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM,
+        htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
+      )
+      . '\');">'
+      . sprintf(
+        MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
+        htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
+      )
+      . '</button>' . $formEnd;
+  }
+
+  private function createUpdateNotice(): string
+  {
+    if (
+      $this->updateStatus === null
+      || !$this->updateStatus['has_update']
+      || empty($this->updateStatus['latest_version'])
+    ) {
+      return '';
+    }
+
+    return '<div class="messageStackWarning">'
+      . sprintf(
+        MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE,
+        htmlspecialchars($this->updateStatus['latest_version'], ENT_QUOTES, 'UTF-8')
+      )
+      . (
+        !empty($this->updateStatus['zip_url']) && !empty($this->updateStatus['sha256'])
+          ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
+          : ' ' . MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE
+      )
+      . '</div>';
+  }
+
+  private function secureDelete(string $path): bool {
+    // 1. Existiert der Pfad überhaupt?
+    if (!file_exists($path)) {
+      return true;
+    }
+
+    // --- SICHERHEITS-CHECK ---
+    // Holt den echten, bereinigten Pfad (löst relative Teile auf)
+    $realPath  = realpath($path);
+    $adminRoot = realpath(DIR_FS_ADMIN);
+
+    // Sicherheitsregel A: Pfad darf nicht leer sein
+    if (empty($realPath) || empty($adminRoot)) {
+      return false;
+    }
+
+    // Sicherheitsregel B: Wenn der Pfad EXAKT dein Admin-Hauptordner 
+    // oder das Hauptverzeichnis (/) ist -> SOFORT ABBRECHEN!
+    if ($realPath === $adminRoot || $realPath === DIRECTORY_SEPARATOR) {
+      return false; 
+    }
+    // -----------------------------------
+
+    if (!is_writable($realPath)) {
+      return false;
+    }
+
+    // Wenn es eine Datei oder ein Symlink ist -> nur diese löschen und beenden!
+    if (!is_dir($realPath) || is_link($realPath)) {
+      return unlink($realPath);
+    }
+
+    // Nur wenn es ein Ordner ist, wird tiefer gegangen
+    try {
+      $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($realPath, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+      );
+
+      foreach ($iterator as $item) {
+        $itemPath = $item->getRealPath();
+
+        if (!is_writable($itemPath)) {
+          return false;
         }
-      }
         
-      if ($result === true) {
-        $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_SUCCESSFULLY_REMOVED, 'success');
-      } else {
-        $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_REMOVAL_INCOMPLETE, 'error');
-      }
-        
-      // Datei selbst löschen
-      $this->secureDelete(DIR_FS_ADMIN.'includes/modules/system/bx_block_contacts.php');
-
-      xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system'));
-    }
-
-    private function getGithubUpdater(): BxGithubModuleUpdater
-    {
-      if ($this->githubUpdater === null) {
-        $this->githubUpdater = new BxGithubModuleUpdater(array(
-          'owner' => 'bx-codemaster',
-          'repo' => 'bx-block-contacts',
-          'module_name' => 'bx-block-contacts',
-          'module_prefix' => 'BX_BLOCK_CONTACTS',
-          'current_version' => version_compare(
-            $this->version,
-            MODULE_BX_BLOCK_CONTACTS_VERSION,
-            '>'
-          ) ? $this->version : MODULE_BX_BLOCK_CONTACTS_VERSION,
-        ));
-      }
-      return $this->githubUpdater;
-    }
-
-    private function createUpdateButton(string $version, bool $standaloneForm): string
-    {
-      $formStart = '';
-      $formEnd = '';
-      $actionField = ' name="bx_updater_action" value="install"';
-      if ($standaloneForm) {
-        $formStart = xtc_draw_form(
-          'bx_block_contacts_update',
-          FILENAME_MODULE_EXPORT,
-          'set=system&module=' . $this->code . '&action=custom'
-        );
-        $formEnd = '</form>';
-        $actionField = '';
-      }
-
-      return $formStart
-        . ($standaloneForm ? xtc_draw_hidden_field('bx_updater_action', 'install') : '')
-        . '<button type="submit"' . $actionField . ' class="button btnbox" onclick="return confirm(\''
-        . sprintf(
-          MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM,
-          htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
-        )
-        . '\');">'
-        . sprintf(
-          MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
-          htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
-        )
-        . '</button>' . $formEnd;
-    }
-
-    private function createUpdateNotice(): string
-    {
-      if (
-        $this->updateStatus === null
-        || !$this->updateStatus['has_update']
-        || empty($this->updateStatus['latest_version'])
-      ) {
-        return '';
-      }
-
-      return '<div class="messageStackWarning">'
-        . sprintf(
-          MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE,
-          htmlspecialchars($this->updateStatus['latest_version'], ENT_QUOTES, 'UTF-8')
-        )
-        . (
-          !empty($this->updateStatus['zip_url']) && !empty($this->updateStatus['sha256'])
-            ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
-            : ' ' . MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE
-        )
-        . '</div>';
-    }
-
-    private function secureDelete(string $path): bool {
-      // 1. Existiert der Pfad überhaupt?
-      if (!file_exists($path)) {
-        return true;
-      }
-
-      // --- SICHERHEITS-CHECK ---
-      // Holt den echten, bereinigten Pfad (löst relative Teile auf)
-      $realPath  = realpath($path);
-      $adminRoot = realpath(DIR_FS_ADMIN);
-
-      // Sicherheitsregel A: Pfad darf nicht leer sein
-      if (empty($realPath) || empty($adminRoot)) {
-        return false;
-      }
-
-      // Sicherheitsregel B: Wenn der Pfad EXAKT dein Admin-Hauptordner 
-      // oder das Hauptverzeichnis (/) ist -> SOFORT ABBRECHEN!
-      if ($realPath === $adminRoot || $realPath === DIRECTORY_SEPARATOR) {
-        return false; 
-      }
-      // -----------------------------------
-
-      if (!is_writable($realPath)) {
-        return false;
-      }
-
-      // Wenn es eine Datei oder ein Symlink ist -> nur diese löschen und beenden!
-      if (!is_dir($realPath) || is_link($realPath)) {
-        return unlink($realPath);
-      }
-
-      // Nur wenn es ein Ordner ist, wird tiefer gegangen
-      try {
-        $iterator = new RecursiveIteratorIterator(
-          new RecursiveDirectoryIterator($realPath, FilesystemIterator::SKIP_DOTS),
-          RecursiveIteratorIterator::CHILD_FIRST
-        );
-
-        foreach ($iterator as $item) {
-          $itemPath = $item->getRealPath();
-
-          if (!is_writable($itemPath)) {
+        if ($item->isDir() && !$item->isLink()) {
+          if (!rmdir($itemPath)) {
             return false;
           }
-          
-          if ($item->isDir() && !$item->isLink()) {
-            if (!rmdir($itemPath)) {
-              return false;
-            }
-          } else {
-            if (!unlink($itemPath)) {
-              return false;
-            }
+        } else {
+          if (!unlink($itemPath)) {
+            return false;
           }
         }
-      } catch (UnexpectedValueException $e) {
-        return false;
       }
-
-      return rmdir($realPath);
+    } catch (UnexpectedValueException $e) {
+      return false;
     }
+
+    return rmdir($realPath);
+  }
 }
