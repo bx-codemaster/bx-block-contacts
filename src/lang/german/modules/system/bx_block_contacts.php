@@ -67,6 +67,7 @@ define('MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE', 'Version %s ist verfügbar. 
 define('MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON', 'Auf Version %s aktualisieren');
 define('MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM', 'Soll das Modul jetzt auf Version %s aktualisiert werden?');
 define('MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE', 'Das Release ist noch nicht installierbar.');
+define('MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK', 'Jetzt auf Updates prüfen');
 
 defined('CFG_TXT_PRODUCTION') || define('CFG_TXT_PRODUCTION', 'Produktiv');
 defined('CFG_TXT_DEVELOPMENT') || define('CFG_TXT_DEVELOPMENT', 'Entwicklung');

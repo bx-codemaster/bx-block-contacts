@@ -77,7 +77,7 @@ class bx_block_contacts {
     $this->title       = MODULE_BX_BLOCK_CONTACTS_TITLE;
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
     $this->sort_order  = defined('MODULE_BX_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BX_BLOCK_CONTACTS_SORT_ORDER : 0;
-    $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') ? ((MODULE_BX_BLOCK_CONTACTS_STATUS == 'true') ? true : false) : 0;
+    $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') && MODULE_BX_BLOCK_CONTACTS_STATUS === 'true';
     $this->version     = '1.2.6';
     $this->development_status = 'p';
 
@@ -108,7 +108,9 @@ class bx_block_contacts {
     }
 
     if (defined('MODULE_BX_BLOCK_CONTACTS_VERSION')) {
-      $this->updateStatus = $this->getGithubUpdater()->checkForUpdate();
+      $this->updateStatus = $this->getGithubUpdater()->checkForUpdate(
+        ($_GET['bx_updater_refresh'] ?? '') === '1'
+      );
       if (
         $this->updateStatus['has_update']
         && !empty($this->updateStatus['zip_url'])
@@ -508,12 +510,22 @@ class bx_block_contacts {
 
   private function createUpdateNotice(): string
   {
+    $refreshLink = '<a class="button btnbox" href="'
+      . xtc_href_link(
+        FILENAME_MODULE_EXPORT,
+        xtc_get_all_get_params(array('bx_updater_refresh'))
+          . 'bx_updater_refresh=1'
+      )
+      . '">' . MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK . '</a>';
+
     if (
       $this->updateStatus === null
       || !$this->updateStatus['has_update']
       || empty($this->updateStatus['latest_version'])
     ) {
-      return '';
+      return '<div class="messageStackInfo">'
+        . $refreshLink
+        . '</div>';
     }
 
     return '<div class="messageStackWarning">'
@@ -526,6 +538,7 @@ class bx_block_contacts {
           ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
           : ' ' . MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE
       )
+      . $refreshLink
       . '</div>';
   }
 
