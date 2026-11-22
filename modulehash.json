@@ -4,9 +4,11 @@
         "shop-root": {
             "hashes": {
                 "/admin_1x2y3z/images/icons/heading/bx_block_contacts.png": "97322f2f06dc62a830a8f0419fa3b34b",
-                "/admin_1x2y3z/includes/classes/BX/Github/BxGithubModuleUpdater.php": "39aedee033f506fafa31ca64b815ba94",
+                "/admin_1x2y3z/includes/classes/BX/Github/BxBlockContactsMigrations.php": "36b5f56c3e0312b83161ac15753f504d",
+                "/admin_1x2y3z/includes/classes/BX/Github/BxGithubModuleUpdater.php": "50eff2dc2251a340a3f1ab82d92a886c",
+                "/admin_1x2y3z/includes/extra/css/bx_block_contacts.php": "1bad4a6a8ac5c5d53d170f81d8196f5d",
                 "/admin_1x2y3z/includes/extra/functions/bx_block_contacts.php": "48c03d082a19473cfc41758b2b805caa",
-                "/admin_1x2y3z/includes/modules/system/bx_block_contacts.php": "5c410385841c31e335863bee12bbf8e4",
+                "/admin_1x2y3z/includes/modules/system/bx_block_contacts.php": "bc0032bc7df3dfd8ee85d4c54a5bbd81",
                 "/lang/english/extra/admin/bx_block_contacts.php": "651812b75bff987848bb78bcefb5afc5",
                 "/lang/english/modules/system/bx_block_contacts.php": "c713ecb5adca3ad053477393a4e6f452",
                 "/lang/german/extra/admin/bx_block_contacts.php": "4e4cae51a3fdd72d671a6d39745c29af",

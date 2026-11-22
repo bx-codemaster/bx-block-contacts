@@ -131,7 +131,7 @@ declare(strict_types=1);
  * 9. Stream package files into staging and hash them in 64 KiB chunks.
  * 10. Back up affected files and write a rollback record incrementally.
  * 11. Install only allowed paths and map the logical admin directory.
- * 12. Run the optional idempotent database migration callback.
+ * 12. Optionally run a callback that is not replaced by this package.
  * 13. Store the installed manifest and updated module configuration version.
  * 14. Write a commit marker and audit entry, then invalidate OPcache.
  * 15. Remove staging only after the committed state has been recorded.
@@ -156,6 +156,8 @@ declare(strict_types=1);
  * A database transaction cannot atomically span filesystem, MySQL DDL and PHP
  * process lifetime. Migration callbacks must therefore be idempotent, manage
  * their own DB transactions and tolerate an earlier partial execution.
+ * Package migrations must run in the following request so PHP loads the newly
+ * installed class definition.
  *
  * SECURITY POLICY
  * ===============
@@ -168,6 +170,8 @@ declare(strict_types=1);
  * - Dotfiles, cache paths and sensitive files such as configure.php are denied.
  * - ZIP download, unpacked total and manifest sizes are bounded.
  * - Ordinary package files are streamed instead of fully buffered in memory.
+ * - Download progress uses CURLOPT_XFERINFOFUNCTION where available and falls
+ *   back to CURLOPT_PROGRESSFUNCTION on PHP 8.0/8.1.
  * - public_key is mandatory; unsigned packages cannot be installed.
  * - The locally stored installed manifest is re-verified by signature before it
  *   is allowed to drive obsolete-file deletion.
@@ -229,6 +233,8 @@ class BxGithubModuleUpdater
     private int $maximumArchiveSize;
     private int $maximumManifestSize;
     private int $maximumExtractedSize;
+    private int $checkConnectTimeout;
+    private int $checkTimeout;
     private ?string $publicKey;
 
     /** @var string[] */
@@ -273,6 +279,8 @@ class BxGithubModuleUpdater
             $this->maximumArchiveSize,
             (int) ($config['maximum_extracted_size'] ?? 4 * $this->maximumArchiveSize)
         );
+        $this->checkConnectTimeout = max(1, (int) ($config['check_connect_timeout'] ?? 2));
+        $this->checkTimeout = max(2, (int) ($config['check_timeout'] ?? 5));
         $publicKey = $config['public_key'] ?? null;
         $this->publicKey = is_string($publicKey) ? trim($publicKey) : '';
         $this->excludePaths = array_map(
@@ -396,6 +404,8 @@ class BxGithubModuleUpdater
      *
      * The callback must manage its own transactional guarantees. Database DDL may
      * commit implicitly and cannot be rolled back together with filesystem changes.
+     * Do not pass a class from the release package itself: PHP has already loaded
+     * the old class definition in the current request.
      *
      * @param null|callable(string,string):void $migration
      * @return array{ok:bool,message:string,version?:string}
@@ -501,7 +511,6 @@ class BxGithubModuleUpdater
                 'zip_sha256' => (string) $status['sha256'],
                 'committed_at' => time(),
             ]);
-            $this->currentVersion = $status['latest_version'];
             $this->markStageCommitted($stageDir);
             $this->removePath($this->cacheFilePath());
             $this->writeAuditEntry(true, $this->currentVersion, (string) $status['sha256'], $changedFiles);
@@ -709,31 +718,21 @@ class BxGithubModuleUpdater
             if (!is_string($manifestContent) || strlen($manifestContent) !== (int) $manifestStat['size']) {
                 throw new RuntimeException('Das Modulmanifest ist ungültig oder zu groß.');
             }
-            $signature = '';
-            {
-                $signatureStat = $zip->statName(self::MANIFEST_SIGNATURE_FILE);
-                if (
-                    !is_array($signatureStat)
-                    || (int) ($signatureStat['size'] ?? -1) <= 0
-                    || (int) $signatureStat['size'] > 256
-                ) {
-                    throw new RuntimeException('Die Manifest-Signatur fehlt oder ist zu groß.');
-                }
-                $signatureContent = $zip->getFromName(self::MANIFEST_SIGNATURE_FILE);
-                if (!is_string($signatureContent) || strlen($signatureContent) !== (int) $signatureStat['size']) {
-                    throw new RuntimeException('Die Manifest-Signatur fehlt.');
-                }
-                $signature = trim($signatureContent);
-                $publicKey = base64_decode($this->publicKey, true);
-                $decodedSignature = base64_decode(trim($signature), true);
-                if (
-                    !is_string($publicKey)
-                    || !is_string($decodedSignature)
-                    || strlen($decodedSignature) !== SODIUM_CRYPTO_SIGN_BYTES
-                    || !sodium_crypto_sign_verify_detached($decodedSignature, $manifestContent, $publicKey)
-                ) {
-                    throw new RuntimeException('Die Manifest-Signatur ist ungültig.');
-                }
+            $signatureStat = $zip->statName(self::MANIFEST_SIGNATURE_FILE);
+            if (
+                !is_array($signatureStat)
+                || (int) ($signatureStat['size'] ?? -1) <= 0
+                || (int) $signatureStat['size'] > 256
+            ) {
+                throw new RuntimeException('Die Manifest-Signatur fehlt oder ist zu groß.');
+            }
+            $signatureContent = $zip->getFromName(self::MANIFEST_SIGNATURE_FILE);
+            if (!is_string($signatureContent) || strlen($signatureContent) !== (int) $signatureStat['size']) {
+                throw new RuntimeException('Die Manifest-Signatur fehlt.');
+            }
+            $signature = trim($signatureContent);
+            if (!$this->verifyManifestSignature($manifestContent, $signature)) {
+                throw new RuntimeException('Die Manifest-Signatur ist ungültig.');
             }
             $manifestData = json_decode($manifestContent, true);
             if (
@@ -747,9 +746,7 @@ class BxGithubModuleUpdater
 
             $files = [];
             $expectedArchiveFiles = [self::MANIFEST_FILE => true];
-            if ($this->publicKey !== null) {
-                $expectedArchiveFiles[self::MANIFEST_SIGNATURE_FILE] = true;
-            }
+            $expectedArchiveFiles[self::MANIFEST_SIGNATURE_FILE] = true;
             foreach ($manifestData['files'] as $path => $hash) {
                 if (!is_string($path) || !is_string($hash) || !preg_match('/^[a-f0-9]{64}$/i', $hash)) {
                     throw new RuntimeException('Das Modulmanifest enthält ungültige Dateieinträge.');
@@ -907,7 +904,12 @@ class BxGithubModuleUpdater
                     continue;
                 }
 
-                $this->ensureDirectory(dirname($target));
+                $this->recordTargetDirectories(
+                    dirname($path),
+                    $rollbackPlan,
+                    $rollbackIndex,
+                    $stageDir . '/rollback.json'
+                );
                 $this->backupTarget(
                     $target,
                     $path,
@@ -968,8 +970,16 @@ class BxGithubModuleUpdater
             }
             try {
                 $path = (string) $entry['path'];
-                if (!$this->isAllowed($path) || $this->isExcluded($path)) {
+                $isDirectory = ($entry['type'] ?? 'file') === 'directory';
+                if (
+                    ($isDirectory ? !$this->isAllowedDirectory($path) : !$this->isAllowed($path))
+                    || $this->isExcluded($path)
+                ) {
                     throw new RuntimeException('Rollback-Pfad ist nicht erlaubt: ' . $path);
+                }
+                if ($isDirectory) {
+                    @rmdir($this->safeTargetPath($path));
+                    continue;
                 }
                 $target = $this->safeTargetPath($path);
                 if (!empty($entry['existed'])) {
@@ -1034,6 +1044,38 @@ class BxGithubModuleUpdater
         ];
         $rollbackIndex[$relativePath] = count($rollbackPlan) - 1;
         $this->writeJsonAtomically($rollbackPlanPath, $rollbackPlan);
+    }
+
+    private function recordTargetDirectories(
+        string $relativeDirectory,
+        array &$rollbackPlan,
+        array &$rollbackIndex,
+        string $rollbackPlanPath
+    ): void {
+        if ($relativeDirectory === '.' || $relativeDirectory === '') {
+            return;
+        }
+        $current = '';
+        foreach (explode('/', $relativeDirectory) as $segment) {
+            $current = $current === '' ? $segment : $current . '/' . $segment;
+            $target = $this->safeTargetPath($current);
+            if (is_dir($target)) {
+                continue;
+            }
+            if (file_exists($target) || is_link($target)) {
+                throw new RuntimeException('Zielpfad ist kein Verzeichnis: ' . $current);
+            }
+            if (isset($rollbackIndex['directory:' . $current])) {
+                continue;
+            }
+            $this->ensureDirectory($target, 0755);
+            $rollbackPlan[] = [
+                'type' => 'directory',
+                'path' => $current,
+            ];
+            $rollbackIndex['directory:' . $current] = count($rollbackPlan) - 1;
+            $this->writeJsonAtomically($rollbackPlanPath, $rollbackPlan);
+        }
     }
 
     private function readInstalledManifest(): array
@@ -1172,8 +1214,8 @@ class BxGithubModuleUpdater
                     return $length;
                 },
                 CURLOPT_FOLLOWLOCATION => false,
-                CURLOPT_CONNECTTIMEOUT => 5,
-                CURLOPT_TIMEOUT => 15,
+                CURLOPT_CONNECTTIMEOUT => $this->checkConnectTimeout,
+                CURLOPT_TIMEOUT => $this->checkTimeout,
                 CURLOPT_HTTPHEADER => $this->githubHeaders($accept, $currentUrl),
                 CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
                 CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTPS,
@@ -1228,6 +1270,19 @@ class BxGithubModuleUpdater
             }
             $headers = '';
             $downloadedBytes = 0;
+            $progressCallback = function (
+                $curlHandle,
+                $downloadSize,
+                $downloaded,
+                $uploadSize,
+                $uploaded
+            ) use (&$downloadedBytes): int {
+                $downloadedBytes = (int) $downloaded;
+                return $downloadedBytes > $this->maximumArchiveSize ? 1 : 0;
+            };
+            $progressOption = defined('CURLOPT_XFERINFOFUNCTION')
+                ? constant('CURLOPT_XFERINFOFUNCTION')
+                : constant('CURLOPT_PROGRESSFUNCTION');
             curl_setopt_array($handle, [
                 CURLOPT_FILE => $file,
                 CURLOPT_FOLLOWLOCATION => false,
@@ -1241,16 +1296,7 @@ class BxGithubModuleUpdater
                 CURLOPT_UNRESTRICTED_AUTH => false,
                 CURLOPT_MAXFILESIZE => $this->maximumArchiveSize,
                 CURLOPT_NOPROGRESS => false,
-                CURLOPT_XFERINFOFUNCTION => function (
-                    $curl,
-                    int $downloadSize,
-                    int $downloaded,
-                    int $uploadSize,
-                    int $uploaded
-                ) use (&$downloadedBytes): int {
-                    $downloadedBytes = $downloaded;
-                    return $downloaded > $this->maximumArchiveSize ? 1 : 0;
-                },
+                $progressOption           => $progressCallback,
                 CURLOPT_HEADERFUNCTION => static function ($handle, string $header) use (&$headers): int {
                     $headers .= $header;
                     return strlen($header);
@@ -1419,11 +1465,27 @@ class BxGithubModuleUpdater
         ) {
             return false;
         }
+
         foreach ($this->allowedPaths as $allowedPath) {
             $normalizedAllowed = strtolower($allowedPath);
             if (
                 $normalizedPath === $normalizedAllowed
                 || strpos($normalizedPath, $normalizedAllowed . '/') === 0
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function isAllowedDirectory(string $path): bool
+    {
+        $normalizedDirectory = rtrim(strtolower($path), '/') . '/';
+        foreach ($this->allowedPaths as $allowedPath) {
+            $normalizedAllowed = rtrim(strtolower($allowedPath), '/') . '/';
+            if (
+                strpos($normalizedAllowed, $normalizedDirectory) === 0
+                || strpos($normalizedDirectory, $normalizedAllowed) === 0
             ) {
                 return true;
             }

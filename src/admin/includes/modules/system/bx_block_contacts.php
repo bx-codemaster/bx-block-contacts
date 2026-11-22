@@ -59,22 +59,53 @@ class bx_block_contacts {
 	public int $sort_order;
 	public bool $enabled;
 	public string $version;
-  public array $properties = array();
 	private bool $_check;
+  public array $properties = array();
   private ?BxGithubModuleUpdater $githubUpdater = null;
   private ?array $updateStatus = null;
 	public string $development_status; // '' = production ready, 'd' = in development, '' = Idee/Konzept
 
   public function __construct() {
     require_once DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+    $migrationFile = DIR_FS_ADMIN
+      . 'includes/classes/BX/Github/BxBlockContactsMigrations.php';
+    if (is_file($migrationFile)) {
+      require_once $migrationFile;
+    }
 
 		$this->code        = 'bx_block_contacts';
     $this->title       = MODULE_BX_BLOCK_CONTACTS_TITLE;
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
     $this->sort_order  = defined('MODULE_BX_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BX_BLOCK_CONTACTS_SORT_ORDER : 0;
     $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') ? ((MODULE_BX_BLOCK_CONTACTS_STATUS == 'true') ? true : false) : 0;
-    $this->version     = '1.1.0';
+    $this->version     = '1.2.6';
     $this->development_status = 'p';
+
+    if (
+      defined('MODULE_BX_BLOCK_CONTACTS_VERSION')
+      && class_exists(BxBlockContactsMigrations::class)
+    ) {
+      try {
+        BxBlockContactsMigrations::migratePending();
+      } catch (Throwable $migrationException) {
+        global $messageStack;
+        if (isset($messageStack) && is_object($messageStack)) {
+          $messageStack->add_session(
+            'BX Block Contacts Datenbankmigration fehlgeschlagen: '
+              . htmlspecialchars($migrationException->getMessage(), ENT_QUOTES, 'UTF-8'),
+            'error'
+          );
+        }
+      }
+    } elseif (defined('MODULE_BX_BLOCK_CONTACTS_VERSION')) {
+      global $messageStack;
+      if (isset($messageStack) && is_object($messageStack)) {
+        $messageStack->add_session(
+          'BX Block Contacts Migrationsklasse fehlt. Keine Datenbankmigration wurde ausgeführt.',
+          'error'
+        );
+      }
+    }
 
     if (defined('MODULE_BX_BLOCK_CONTACTS_VERSION')) {
       $this->updateStatus = $this->getGithubUpdater()->checkForUpdate();
@@ -91,7 +122,7 @@ class bx_block_contacts {
     }
   }
 
-  public function process(): never {
+  public function process(): void {
     if (($_POST['bx_updater_action'] ?? '') === 'install') {
       global $messageStack;
       $result = $this->getGithubUpdater()->installLatestUpdate();
@@ -296,7 +327,7 @@ class bx_block_contacts {
 																												set_function )
 																							 VALUES ( '', 
 																							          'MODULE_BX_BLOCK_CONTACTS_VERSION',
-																							          '1.1.0', 
+																							          '" . $this->version . "',
 																												'6', 
 																												'4', 
 																												now(), 
@@ -319,10 +350,34 @@ class bx_block_contacts {
 																												now(), 
 																												'', 
 																												'bx_show_blocked( ')");
+
+    $schemaSortQuery = xtc_db_query(
+      "SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
+       FROM " . TABLE_CONFIGURATION . "
+       WHERE configuration_group_id = " . (int) $freeId["id"]
+    );
+    $schemaSort = $schemaSortQuery
+      ? xtc_db_fetch_array($schemaSortQuery)
+      : array();
+    $schemaSortOrder = ((int) ($schemaSort['max_sort_order'] ?? 0)) + 1;
+
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . "
+                  (configuration_key, configuration_value, configuration_group_id, sort_order, date_added)
+                  VALUES (
+                    'MODULE_BX_BLOCK_CONTACTS_SCHEMA_VERSION',
+                    '1.2.0',
+                    " . (int) $freeId["id"] . ",
+                    " . $schemaSortOrder . ",
+                    NOW()
+                  )");
 	}
 
   public function remove(): void {
     xtc_db_query("DELETE FROM ".TABLE_CONFIGURATION." WHERE configuration_key in ('".implode("', '", $this->keys())."')");
+    xtc_db_query(
+      "DELETE FROM " . TABLE_CONFIGURATION
+      . " WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_SCHEMA_VERSION'"
+    );
 		xtc_db_query("DELETE FROM ".TABLE_CONFIGURATION_GROUP." WHERE configuration_group_title = 'BX Block Contacts'");
 		xtc_db_query("ALTER TABLE ".TABLE_ADMIN_ACCESS." DROP bx_block_contacts");
   }
@@ -358,6 +413,11 @@ class bx_block_contacts {
 
     $dirs_and_files[] = DIR_FS_ADMIN . 'images/icons/heading/bx_block_contacts.png';
     $dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/functions/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/css/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_ADMIN
+      . 'includes/classes/BX/Github/BxBlockContactsMigrations.php';
+    $dirs_and_files[] = DIR_FS_CATALOG
+      . 'cache/bx_github_updater/bx-block-contacts';
     $dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/extra/admin/bx_block_contacts.php';
     $dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/modules/system/bx_block_contacts.php';
     $dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/extra/admin/bx_block_contacts.php';
@@ -397,6 +457,7 @@ class bx_block_contacts {
         'allowed_paths' => array(
           'admin/includes/classes/BX/Github',
           'admin/includes/extra/functions',
+          'admin/includes/extra/css',
           'admin/includes/modules/system',
           'admin/images/icons/heading',
           'lang/english/extra/admin',
@@ -432,7 +493,7 @@ class bx_block_contacts {
 
     return $formStart
       . ($standaloneForm ? xtc_draw_hidden_field('bx_updater_action', 'install') : '')
-      . '<input type="submit"' . $actionField . ' class="button but_green" onclick="return confirm(\''
+      . '<button type="submit"' . $actionField . ' class="button bx-update" onclick="return confirm(\''
       . sprintf(
         MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM,
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
@@ -442,7 +503,7 @@ class bx_block_contacts {
         MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
       )
-      . '</input>' . $formEnd;
+      . '</button>' . $formEnd;
   }
 
   private function createUpdateNotice(): string
