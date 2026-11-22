@@ -111,6 +111,7 @@ class bx_block_contacts {
       $this->updateStatus = $this->getGithubUpdater()->checkForUpdate(
         ($_GET['bx_updater_refresh'] ?? '') === '1'
       );
+      $this->properties['button_update'] = $this->createRefreshButton();
       if (
         $this->updateStatus['has_update']
         && !empty($this->updateStatus['zip_url'])
@@ -119,7 +120,7 @@ class bx_block_contacts {
         $this->properties['button_update'] = $this->createUpdateButton(
           $this->updateStatus['latest_version'],
           true
-        );
+        ) . $this->properties['button_update'];
       }
     }
   }
@@ -501,38 +502,49 @@ class bx_block_contacts {
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
       )
       . '\');">'
+      . '<br>'
       . sprintf(
         MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
       )
-      . '</button>' . $formEnd;
+      . '</button>' . $formEnd . '<br>';
   }
 
-  private function createUpdateNotice(): string
+  private function createRefreshButton(): string
   {
-    $refreshLink = '<a class="button btnbox" href="'
+    $label = defined('MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK')
+      ? MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK
+      : 'Check for updates now';
+
+    return '<a class="button btnbox" href="'
       . xtc_href_link(
         FILENAME_MODULE_EXPORT,
         xtc_get_all_get_params(array('bx_updater_refresh'))
           . 'bx_updater_refresh=1'
       )
-      . '">' . MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK . '</a>';
+      . '" style="width: auto; display: inline-block;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</a>';
+  }
+
+  private function createUpdateNotice(): string
+  {
+    $refreshLink = $this->createRefreshButton();
 
     if (
       $this->updateStatus === null
       || !$this->updateStatus['has_update']
       || empty($this->updateStatus['latest_version'])
     ) {
-      return '<div class="messageStackInfo">'
+      return '<div class="messageStackInfo txta-c">'
         . $refreshLink
         . '</div>';
     }
 
-    return '<div class="messageStackWarning">'
+    return '<div class="messageStackWarning txta-c">'
       . sprintf(
         MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE,
         htmlspecialchars($this->updateStatus['latest_version'], ENT_QUOTES, 'UTF-8')
       )
+      . '<br>'
       . (
         !empty($this->updateStatus['zip_url']) && !empty($this->updateStatus['sha256'])
           ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
