@@ -234,7 +234,7 @@ class bx_block_contacts {
 	         . '    </tr>'. "\n"
 	         . '    <tr>'. "\n"
 	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_LOCAL_PARTS.':</td>'. "\n"
-	         . '      <td class="col-middle">'.xtc_draw_input_field('block_localparts', '', '').'</td>". "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_localparts', '', '').'</td>'. "\n"
 	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_LOCAL_PARTS.'</td>'. "\n"
 	         . '    </tr>'. "\n"
 	         . '    <tr>'. "\n"
