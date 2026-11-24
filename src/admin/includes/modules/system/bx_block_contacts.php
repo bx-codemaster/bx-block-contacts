@@ -66,7 +66,23 @@ class bx_block_contacts {
 	public string $development_status; // '' = production ready, 'd' = in development, '' = Idee/Konzept
 
   public function __construct() {
-    require_once DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+    // Bootstrap-Logik für Übergangsphase:zentraler Updater bevorzugt, eigene Kopie nur als Fallback
+    if (!class_exists(BxGithubModuleUpdater::class)) {
+      $bootstrapPath = DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+      if (!is_file($bootstrapPath)) {
+        throw new RuntimeException('bx-module-updater ist nicht installiert.');
+      }
+      require_once $bootstrapPath;
+    } elseif (
+      defined(BxGithubModuleUpdater::class . '::VERSION')
+      && version_compare(BxGithubModuleUpdater::VERSION, '1.1.0', '>')
+    ) {
+      // Zentrale Version ist neuer → eigene Kopie NICHT laden (wird gar nicht mehr ausgeliefert)
+    } else {
+      // Fallback: eigene Kopie laden (für Installationen ohne zentralen Updater)
+      require_once DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+    }
+
     $migrationFile = DIR_FS_ADMIN
       . 'includes/classes/BX/Github/BxBlockContactsMigrations.php';
     if (is_file($migrationFile)) {
@@ -78,7 +94,7 @@ class bx_block_contacts {
     $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
     $this->sort_order  = defined('MODULE_BX_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BX_BLOCK_CONTACTS_SORT_ORDER : 0;
     $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') && MODULE_BX_BLOCK_CONTACTS_STATUS === 'true';
-    $this->version     = '1.2.6';
+    $this->version     = '1.3.0';
     $this->development_status = 'p';
 
     if (
@@ -137,7 +153,7 @@ class bx_block_contacts {
     }
 
 		$json = array( 'emails' => array(), 'domains' => array(), 'localparts' => array(), );
-		
+
 		if(!empty(MODULE_BX_BLOCK_CONTACTS_BLOCKED)) {
 			$json = json_decode(MODULE_BX_BLOCK_CONTACTS_BLOCKED, true);
 		}
@@ -186,173 +202,173 @@ class bx_block_contacts {
 						}
 					}
 					break;
-			}			
+			}
 		}
 
 		$blocked = json_encode($json);
 		xtc_db_perform(TABLE_CONFIGURATION, array('configuration_value' => $blocked,
-																							'last_modified' => 'now()'),
-																							'update', "configuration_key='MODULE_BX_BLOCK_CONTACTS_BLOCKED'");
-		
+																								'last_modified' => 'now()'),
+																								'update', "configuration_key='MODULE_BX_BLOCK_CONTACTS_BLOCKED'");
+
 		xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT,'set=system&module='.$this->code.'&action=edit'));
   }
 
   public function display(): array {
     $txt = $this->createUpdateNotice() . '<input type="hidden" name="area" value="" /><input type="hidden" name="areavalue" value="" />
-		<table class="tableConfig">'. "\n"
-         . '  <tbody>'. "\n"
-         . '    <tr>'. "\n"
-         . '      <th class="txta-l">'.MODULE_BLOCKED_CONTACTS_PLS_BLOCK.':</th>'. "\n"
-         . '      <th>&nbsp;</th>'. "\n"
-         . '      <th>&nbsp;</th>'. "\n"
-         . '    </tr>'. "\n"
-         . '    <tr>'. "\n"
-         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_EMAIL_ADDRESSES.':</td>'. "\n"
-         . '      <td class="col-middle">'.xtc_draw_input_field('block_email', '', '').'</td>'. "\n"
-         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_EMAIL_ADDRESSES.'</td>'. "\n"
-         . '    </tr>'. "\n"
-         . '    <tr>'. "\n"
-         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_DOMAINS.':</td>'. "\n"
-         . '      <td class="col-middle">'.xtc_draw_input_field('block_domain', '', '').'</td>'. "\n"
-         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_DOMAINS.'</td>'. "\n"
-         . '    </tr>'. "\n"
-         . '    <tr>'. "\n"
-         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_LOCAL_PARTS.':</td>'. "\n"
-         . '      <td class="col-middle">'.xtc_draw_input_field('block_localparts', '', '').'</td>'. "\n"
-         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_LOCAL_PARTS.'</td>'. "\n"
-         . '    </tr>'. "\n"
-         . '    <tr>'. "\n"
-         . '      <td colspan="3"></td>'. "\n"
-         . '    </tr>'. "\n"
-         . '  </tbody>'. "\n"
-         . '</table>'. "\n"
-         . '<div style="text-align: center;">'. "\n"
-         . xtc_button(BUTTON_SAVE).xtc_button_link(BUTTON_BACK, xtc_href_link(FILENAME_MODULE_EXPORT, 'set='.$_GET['set'].'&module='.$this->code)). "\n"
-         . '</div>'. "\n";
+			<table class="tableConfig">'. "\n"
+	         . '  <tbody>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <th class="txta-l">'.MODULE_BLOCKED_CONTACTS_PLS_BLOCK.':</th>'. "\n"
+	         . '      <th>&nbsp;</th>'. "\n"
+	         . '      <th>&nbsp;</th>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_EMAIL_ADDRESSES.':</td>'. "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_email', '', '').'</td>'. "\n"
+	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_EMAIL_ADDRESSES.'</td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_DOMAINS.':</td>'. "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_domain', '', '').'</td>'. "\n"
+	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_DOMAINS.'</td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_LOCAL_PARTS.':</td>'. "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_localparts', '', '').'</td>". "\n"
+	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_LOCAL_PARTS.'</td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td colspan="3"></td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '  </tbody>'. "\n"
+	         . '</table>'. "\n"
+	         . '<div style="text-align: center;">'. "\n"
+	         . xtc_button(BUTTON_SAVE).xtc_button_link(BUTTON_BACK, xtc_href_link(FILENAME_MODULE_EXPORT, 'set='.$_GET['set'].'&module='.$this->code)). "\n"
+	         . '</div>'. "\n";
     return array('text' => $txt);
 	}
 
   public function check(): bool {
     if (!isset($this->_check)) {
-      $check_query = xtc_db_query("SELECT configuration_value 
+      $check_query = xtc_db_query("SELECT configuration_value
                                      FROM ".TABLE_CONFIGURATION."
                                     WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_STATUS'");
       $this->_check = xtc_db_num_rows($check_query) > 0;
     }
     return $this->_check;
   }
-    
+
   public function install(): void {
 		xtc_db_query("ALTER TABLE ".TABLE_ADMIN_ACCESS." ADD bx_block_contacts INTEGER(1)");
 		xtc_db_query("UPDATE ".TABLE_ADMIN_ACCESS." SET bx_block_contacts = 1");
 
-  	$freeId_query = xtc_db_query("SELECT (configuration_group_id+1) AS id 
-	                                FROM " . TABLE_CONFIGURATION_GROUP . " 
-																	WHERE (configuration_group_id+1) NOT IN (SELECT configuration_group_id FROM " . TABLE_CONFIGURATION_GROUP . " WHERE configuration_group_id IS NOT NULL) 
-																	LIMIT 1;");
+  	$freeId_query = xtc_db_query("SELECT (configuration_group_id+1) AS id
+		                                FROM " . TABLE_CONFIGURATION_GROUP . "
+																		WHERE (configuration_group_id+1) NOT IN (SELECT configuration_group_id FROM " . TABLE_CONFIGURATION_GROUP . " WHERE configuration_group_id IS NOT NULL)
+																		LIMIT 1;");
 		$freeId = xtc_db_fetch_array($freeId_query);
 
-		$freeSort_query = xtc_db_query("SELECT (sort_order+1) AS sort_order 
-	                                  FROM ".TABLE_CONFIGURATION_GROUP." 
-																		WHERE (sort_order+1) NOT IN (SELECT sort_order FROM ".TABLE_CONFIGURATION_GROUP." WHERE sort_order IS NOT NULL) 
-																		LIMIT 1;");
+		$freeSort_query = xtc_db_query("SELECT (sort_order+1) AS sort_order
+		                                  FROM ".TABLE_CONFIGURATION_GROUP."
+																			WHERE (sort_order+1) NOT IN (SELECT sort_order FROM ".TABLE_CONFIGURATION_GROUP." WHERE sort_order IS NOT NULL)
+																			LIMIT 1;");
 		$freeSort = xtc_db_fetch_array($freeSort_query);
-		
+
 		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION_GROUP." ( configuration_group_id,
-																															configuration_group_title, 
-																															configuration_group_description, 
-																															sort_order, 
-																															visible) 
-																										 VALUES ( ".$freeId["id"].", 
-																										 					'BX Block Contacts', 
-																															'Kontaktverbot für Störenfriede!', 
-																															".$freeSort["sort_order"].", 
-																															1)");
+																																configuration_group_title,
+																																configuration_group_description,
+																																sort_order,
+																																visible)
+																											 VALUES ( ".$freeId["id"].",
+																											 					'BX Block Contacts',
+																																'Kontaktverbot für Störenfriede!',
+																																".$freeSort["sort_order"].",
+																																1)");
 
 		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
-		                                                    configuration_key, 
-																												configuration_value, 
-																												configuration_group_id, 
-																												sort_order, 
-																												date_added, 
-																												use_function, 
-																												set_function )
-																							 VALUES ( '', 
-																							          'MODULE_BX_BLOCK_CONTACTS_STATUS',
-																												'true', 
-																												'6', 
-																												'1', 
-																												now(), 
-																												'', 
-																												'xtc_cfg_select_option(array(\'true\', \'false\'), ')");
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_STATUS',
+																													'true',
+																													'6',
+																													'1',
+																													now(),
+																													'',
+																													'xtc_cfg_select_option(array(\'true\', \'false\'), ')");
 
-		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
-		                                                    configuration_key, 
-																												configuration_value, 
-																												configuration_group_id, 
-																												sort_order, 
-																												date_added, 
-																												use_function, 
-																												set_function )
-																							 VALUES ( '', 
-																							          'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID',
-																							          '".$freeId["id"]."', 
-																												'6', 
-																												'2', 
-																												now(), 
-																												'bx_bc_get_group_id', 
-																												'xtc_convert_value( ')");
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID',
+																								          '".$freeId["id"]."',
+																													'6',
+																													'2',
+																													now(),
+																													'bx_bc_get_group_id',
+																													'xtc_convert_value( ')");
 
-		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
-		                                                    configuration_key, 
-																												configuration_value, 
-																												configuration_group_id, 
-																												sort_order, 
-																												date_added, 
-																												use_function, 
-																												set_function )
-																							 VALUES ( '', 
-																							          'MODULE_BX_BLOCK_CONTACTS_DEVELOPMENT',
-																							          'unstable', 
-																												'6', 
-																												'3', 
-																												now(), 
-																												'', 
-																												'xtc_cfg_select_option(array(\\'production\\', \\'development\\', \\'release\\', \\'unstable\\'), ')");
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_DEVELOPMENT',
+																								          'unstable',
+																													'6',
+																													'3',
+																													now(),
+																													'',
+																													'xtc_cfg_select_option(array(\\'production\\', \\'development\\', \\'release\\', \\'unstable\\'), ')");
 
-		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
-		                                                    configuration_key, 
-																												configuration_value, 
-																												configuration_group_id, 
-																												sort_order, 
-																												date_added, 
-																												use_function, 
-																												set_function )
-																							 VALUES ( '', 
-																							          'MODULE_BX_BLOCK_CONTACTS_VERSION',
-																							          '" . $this->version . "',
-																												'6', 
-																												'4', 
-																												now(), 
-																												'', 
-																												'')");
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_VERSION',
+																								          '" . $this->version . "',
+																													'6',
+																													'4',
+																													now(),
+																													'',
+																													'')");
 
-		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id, 
-		                                                    configuration_key, 
-																												configuration_value, 
-																												configuration_group_id, 
-																												sort_order, 
-																												date_added, 
-																												use_function, 
-																												set_function )
-																							 VALUES ( '', 
-																							          'MODULE_BX_BLOCK_CONTACTS_BLOCKED',
-																							          '', 
-																												'".$freeId["id"]."', 
-																												'1', 
-																												now(), 
-																												'', 
-																												'bx_show_blocked( ')");
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_BLOCKED',
+																								          '',
+																													'".$freeId["id"]."',
+																													'1',
+																													now(),
+																													'',
+																													'bx_show_blocked( ')");
 
     $schemaSortQuery = xtc_db_query(
       "SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
@@ -410,7 +426,7 @@ class bx_block_contacts {
 
     global $messageStack;
     $result = true;
-      
+
     // Dateien definieren
     $dirs_and_files   = array();
 
@@ -434,13 +450,13 @@ class bx_block_contacts {
         $result = false;
       }
     }
-      
+
     if ($result === true) {
       $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_SUCCESSFULLY_REMOVED, 'success');
     } else {
       $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_REMOVAL_INCOMPLETE, 'error');
     }
-      
+
     // Datei selbst löschen
     $this->secureDelete(DIR_FS_ADMIN.'includes/modules/system/bx_block_contacts.php');
 
@@ -502,7 +518,6 @@ class bx_block_contacts {
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
       )
       . '\');">'
-      . '<br>'
       . sprintf(
         MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
         htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
@@ -570,10 +585,10 @@ class bx_block_contacts {
       return false;
     }
 
-    // Sicherheitsregel B: Wenn der Pfad EXAKT dein Admin-Hauptordner 
+    // Sicherheitsregel B: Wenn der Pfad EXAKT dein Admin-Hauptordner
     // oder das Hauptverzeichnis (/) ist -> SOFORT ABBRECHEN!
     if ($realPath === $adminRoot || $realPath === DIRECTORY_SEPARATOR) {
-      return false; 
+      return false;
     }
     // -----------------------------------
 
@@ -599,7 +614,7 @@ class bx_block_contacts {
         if (!is_writable($itemPath)) {
           return false;
         }
-        
+
         if ($item->isDir() && !$item->isLink()) {
           if (!rmdir($itemPath)) {
             return false;
