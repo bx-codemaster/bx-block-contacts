@@ -220,6 +220,7 @@ declare(strict_types=1);
  */
 class BxGithubModuleUpdater
 {
+    public const VERSION = '1.1.0';
     private string $owner;
     private string $repo;
     private string $moduleName;

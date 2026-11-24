@@ -44,16 +44,51 @@ class bx_module_updater {
     // Bekannte Produktmodule, die den Updater nutzen (für Auto-Discovery)
     private const KNOWN_MODULES = [
         'bx_block_contacts' => [
-            'prefix' => 'BX_BLOCK_CONTACTS',
-            'owner'  => 'bx-codemaster',
-            'repo'   => 'bx-block-contacts',
-            'key'    => 'RhVqKVDgRLHueQs0eYZBgbhU++wzMY5XETzYL+z5q3A=',
+        'prefix'       => 'BX_BLOCK_CONTACTS',
+        'owner'        => 'bx-codemaster',
+        'repo'         => 'bx-block-contacts',
+        'key'          => 'RhVqKVDgRLHueQs0eYZBgbhU++wzMY5XETzYL+z5q3A=',
+        'allowed_paths' => [
+            'admin/includes/classes/BX/Github',
+            'admin/includes/extra/functions',
+            'admin/includes/extra/css',
+            'admin/includes/modules/system',
+            'admin/images/icons/heading',
+            'lang/english/extra/admin',
+            'lang/english/modules/system',
+            'lang/german/extra/admin',
+            'lang/german/modules/system',
+            'media/content',
+            ],
         ],
         'bx_advent_calendar' => [
-            'prefix' => 'BX_ADVENT_CALENDAR',
-            'owner'  => 'bx-codemaster',
-            'repo'   => 'bx-advent-calendar',
-            'key'    => '', // wird per Modul gesetzt
+            'prefix'       => 'BX_ADVENT_CALENDAR',
+            'owner'        => 'bx-codemaster',
+            'repo'         => 'bx-advent-calendar',
+            'key'          => 'ZgJA/UwCAN1f0IbmsT81ZNFkwjcIoIQsNZB+x4Va1DM=',  // ← DEIN PUBLIC KEY
+            'allowed_paths' => [
+                'admin/includes/classes',
+                'admin/includes/extra/csrf_exclusion',
+                'admin/includes/extra/css',
+                'admin/includes/extra/javascript',
+                'admin/includes/extra/filenames',
+                'admin/includes/extra/menu',
+                'admin/includes/modules/system',
+                'admin/images/icons/heading',
+                'admin',
+                'includes/extra/database_tables',
+                'includes/extra/wysiwyg',
+                'includes/extra/header/header_head',
+                'includes/classes',
+                'lang/english/extra/admin',
+                'lang/english/modules/system',
+                'lang/german/extra/admin',
+                'lang/german/modules/system',
+                'media/content',
+                'templates/tpl_modified_nova/css',
+                'templates/tpl_modified_nova/module',
+                'templates/tpl_modified_nova/javascript/extra',
+            ],
         ],
         // Weitere Module hier eintragen oder per Scan ermitteln
     ];
@@ -116,15 +151,16 @@ class bx_module_updater {
             xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit'));
         }
 
-        xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit'));
+        //xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit'));
     }
 
     public function display(): array {
-        $html = $this->createSelfUpdateNotice();
+        $html = '';
+        $html .= '<div>' . xtc_button(BUTTON_SAVE) .xtc_button_link(BUTTON_CANCEL, xtc_href_link(FILENAME_MODULE_EXPORT, 'set=' . $_GET['set'] . '&module=bx_module_updater')) . "</div><br />";
+        $html .= $this->createSelfUpdateNotice();
         $html .= $this->createModuleOverview();
         $html .= $this->createToolsSection();
-
-        return ['text' => $html];
+        return array('text' => $html);
     }
 
     public function check(): bool {
@@ -167,9 +203,9 @@ class bx_module_updater {
 
         $configs = [
             ['MODULE_BX_MODULE_UPDATER_STATUS', 'true', 1, 'xtc_cfg_select_option(array(\'true\', \'false\'), '],
-            ['MODULE_BX_MODULE_UPDATER_SORT_ORDER', '100', 2, ''],
-            ['MODULE_BX_MODULE_UPDATER_VERSION', $this->version, 3, ''],
-            ['MODULE_BX_MODULE_UPDATER_CONFIG_ID', $group_id, 4, ''],
+            ['MODULE_BX_MODULE_UPDATER_SORT_ORDER', '100', 2, 'xtc_convert_value( '],
+            ['MODULE_BX_MODULE_UPDATER_VERSION', $this->version, 3, 'xtc_convert_value( '],
+            ['MODULE_BX_MODULE_UPDATER_CONFIG_ID', $group_id, 4, 'xtc_convert_value( '],
         ];
 
         foreach ($configs as $i => $c) {
@@ -188,8 +224,8 @@ class bx_module_updater {
     public function keys(): array {
         return [
             'MODULE_BX_MODULE_UPDATER_STATUS',
-            'MODULE_BX_MODULE_UPDATER_SORT_ORDER',
             'MODULE_BX_MODULE_UPDATER_VERSION',
+            'MODULE_BX_MODULE_UPDATER_SORT_ORDER',
             'MODULE_BX_MODULE_UPDATER_CONFIG_ID',
         ];
     }
@@ -272,29 +308,33 @@ class bx_module_updater {
         foreach (self::KNOWN_MODULES as $code => $info) {
             $versionKey = 'MODULE_' . $info['prefix'] . '_VERSION';
             $statusKey  = 'MODULE_' . $info['prefix'] . '_STATUS';
+            $titleKey   = 'MODULE_' . $info['prefix'] . '_TITLE';
 
-            if (defined($versionKey) && defined($statusKey)) {
-                $modules[$code] = [
-                    'code'        => $code,
-                    'title'       => constant('MODULE_' . $info['prefix'] . '_TITLE') ?? $code,
-                    'version'     => constant($versionKey),
-                    'enabled'     => constant($statusKey) === 'true',
-                    'prefix'      => $info['prefix'],
-                    'owner'       => $info['owner'],
-                    'repo'        => $info['repo'],
-                    'public_key'  => $info['key'],
-                    'updater_ok'  => class_exists(BxGithubModuleUpdater::class),
-                ];
+            // NUR aufnehmen, wenn Modul wirklich installiert ist (Konstanten definiert)
+            if (!defined($versionKey) || !defined($statusKey)) {
+                continue; // Modul nicht installiert → überspringen
             }
+
+            $modules[$code] = [
+                'code'        => $code,
+                'title'       => defined($titleKey) ? constant($titleKey) : $code,
+                'version'     => constant($versionKey),
+                'enabled'     => strtolower((string) constant($statusKey)) === 'true',
+                'prefix'      => $info['prefix'],
+                'owner'       => $info['owner'],
+                'repo'        => $info['repo'],
+                'public_key'  => $info['key'],
+                'updater_ok'  => class_exists(BxGithubModuleUpdater::class),
+                'allowed_paths' => $info['allowed_paths'] ?? [],
+            ];
         }
 
-        // Zusätzlich: Versuche Module per Dateisystem zu entdecken
+        // Zusätzlich: Versuche Module per Dateisystem zu entdecken (nur als Hinweis)
         $moduleDir = DIR_FS_ADMIN . 'includes/modules/system/';
         if (is_dir($moduleDir)) {
             foreach (glob($moduleDir . 'bx_*.php') as $file) {
                 $code = basename($file, '.php');
                 if (!isset($modules[$code]) && $code !== 'bx_module_updater') {
-                    // Versuche Prefix zu erraten
                     $modules[$code] = [
                         'code'        => $code,
                         'title'       => $code,
@@ -318,28 +358,25 @@ class bx_module_updater {
      * Selbstupdate-Hinweis rendern
      */
     private function createSelfUpdateNotice(): string {
-        $refreshLink = $this->createRefreshButton();
-
         if (
             $this->updateStatus === null
             || !$this->updateStatus['has_update']
             || empty($this->updateStatus['latest_version'])
         ) {
+            // Kein Update: Nur Refresh-Button (aus properties oder neu)
+            $refreshBtn = $this->properties['button_update'] ?? $this->createRefreshButton();
             return '<div class="messageStackInfo txta-c">'
                 . '<strong>BX Module Updater v' . htmlspecialchars($this->version) . '</strong> — aktuell'
-                . '<br>' . $refreshLink
+                . '<br>' . $refreshBtn
                 . '</div>';
         }
 
+        // Update verfügbar: properties['button_update'] enthält BEIDES (Update + Refresh)
+        $buttons = $this->properties['button_update'] ?? $this->createUpdateButton($this->updateStatus['latest_version'], false) . $this->createRefreshButton();
+
         return '<div class="messageStackWarning txta-c">'
             . '<strong>BX Module Updater Update verfügbar: v' . htmlspecialchars($this->updateStatus['latest_version']) . '</strong>'
-            . '<br>'
-            . (
-                !empty($this->updateStatus['zip_url']) && !empty($this->updateStatus['sha256'])
-                    ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
-                    : ' <span class="error">' . MODULE_BX_MODULE_UPDATER_UPDATE_NOT_INSTALLABLE . '</span>'
-            )
-            . '<br>' . $refreshLink
+            . '<br>' . $buttons
             . '</div>';
     }
 
@@ -353,7 +390,7 @@ class bx_module_updater {
         $html = '<h3>Installierte Module mit Updater-Integration</h3>';
         $html .= '<table class="tableConfig" style="width: 100%; margin-top: 10px;">';
         $html .= '<thead><tr class="dataTableHeadingRow">';
-        $html .= '<th>Modul</th><th>Version</th><th>Status</th><th>Updater</th><th>Update</th><th>Aktionen</th>';
+        $html .= '<th>Modul</th><th>Version</th><th>Status</th><th>Update</th><th>Aktionen</th>';
         $html .= '</tr></thead><tbody>';
 
         foreach ($modules as $mod) {
@@ -361,7 +398,6 @@ class bx_module_updater {
             $html .= '<td><strong>' . htmlspecialchars($mod['title']) . '</strong> (<code>' . htmlspecialchars($mod['code']) . '</code>)</td>';
             $html .= '<td>' . htmlspecialchars($mod['version']) . '</td>';
             $html .= '<td>' . ($mod['enabled'] ? '<span class="success">Aktiv</span>' : '<span class="error">Inaktiv</span>') . '</td>';
-            $html .= '<td>' . ($mod['updater_ok'] ? '<span class="success">OK (v' . $updaterVersion . ')</span>' : '<span class="error">Fehlt</span>') . '</td>';
 
             // Update-Check für dieses Modul (falls Konfiguration vorhanden)
             $updateInfo = $this->checkModuleUpdate($mod);
@@ -369,7 +405,7 @@ class bx_module_updater {
 
             $html .= '<td>';
             if ($mod['updater_ok'] && !empty($mod['public_key'])) {
-                $html .= '<a class="button btnbox" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $mod['code'] . '&action=edit') . '">Konfigurieren</a> ';
+                $html .= '<a class="button btnbox txta-c" style="margin: 0;" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $mod['code'] . '&action=edit') . '">Konfigurieren</a> ';
             }
             if (isset($mod['discovered'])) {
                 $html .= '<span class="smallText">(Auto-entdeckt, Config fehlt)</span>';
@@ -398,7 +434,7 @@ class bx_module_updater {
                 'module_prefix' => $mod['prefix'],
                 'admin_dir'     => DIR_ADMIN,
                 'public_key'    => $mod['public_key'],
-                'allowed_paths' => [], // nicht nötig für Check
+                'allowed_paths'   => $mod['allowed_paths'],
                 'current_version' => constant('MODULE_' . $mod['prefix'] . '_VERSION'),
                 'cache_ttl_seconds' => 3600,
             ]);
@@ -421,33 +457,29 @@ class bx_module_updater {
      * Tools-Sektion (Cache, Force-Check, Audit-Log)
      */
     private function createToolsSection(): string {
-        $form = xtc_draw_form('bx_updater_tools', FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit');
-
         $html = '<hr style="margin: 20px 0;">';
         $html .= '<h3>Werkzeuge & Diagnose</h3>';
-        $html .= $form;
-        $html .= '<div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0;">';
+        $html .= '<div style="display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; align-items: stretch; gap: 10px; margin: 10px 0;">';
 
-        // Cache leeren
-        $html .= '<button type="submit" name="bx_updater_clear_cache" value="1" class="button btnbox" onclick="return confirm(\'Wirklich alle Updater-Caches leeren?\');">Cache leeren</button>';
+        // Cache leeren - Button im Hauptform
+        $html .= '<button type="submit" name="bx_updater_clear_cache" value="1" class="button btnbox txta-c" style="flex: 1 1 10%;" onclick="return confirm(\'Wirklich alle Updater-Caches leeren?\');">Cache leeren</button>';
 
-        // Force-Check
-        $html .= '<button type="submit" name="bx_updater_force_check" value="1" class="button btnbox" onclick="return confirm(\'Force-Check für alle Module anstoßen?\');">Force-Check alle Module</button>';
+        // Force-Check - Button im Hauptform
+        $html .= '<button type="submit" name="bx_updater_force_check" value="1" class="button btnbox txta-c" style="flex: 1 1 10%;" onclick="return confirm(\'Force-Check für alle Module anstoßen?\');">Force-Check alle Module</button>';
 
-        // Audit-Log anzeigen
-        $html .= '<a class="button btnbox" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=audit') . '">Audit-Log anzeigen</a>';
+        // Audit-Log
+        $html .= '<a class="button btnbox txta-c" style="flex: 1 1 10%;" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit&view=audit') . '">Audit-Log anzeigen</a>';
 
         // Updater-Info
-        $html .= '<a class="button btnbox" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=info') . '">Updater-Info</a>';
+        $html .= '<a class="button btnbox txta-c" style="flex: 1 1 10%;" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit&view=info') . '">Updater-Info</a>';
 
         $html .= '</div>';
-        $html .= '</form>';
 
         // Audit-Log anzeigen falls angefordert
-        if (($_GET['action'] ?? '') === 'audit') {
+        if (($_GET['view'] ?? '') === 'audit') {
             $html .= $this->renderAuditLog();
         }
-        if (($_GET['action'] ?? '') === 'info') {
+        if (($_GET['view'] ?? '') === 'info') {
             $html .= $this->renderUpdaterInfo();
         }
 
@@ -484,7 +516,7 @@ class bx_module_updater {
         } else {
             $html .= '<p class="smallText">Kein Audit-Log vorhanden.</p>';
         }
-        $html .= '<p><a class="button btnbox" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit') . '">Zurück</a></p>';
+        $html .= '<p><a class="button btnbox txta-c" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit') . '">Zurück</a></p>';
         return $html;
     }
 
@@ -512,7 +544,7 @@ class bx_module_updater {
         }
 
         $html .= '</tbody></table>';
-        $html .= '<p><a class="button btnbox" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit') . '">Zurück</a></p>';
+        $html .= '<p><a class="button btnbox txta-c" href="' . xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=' . $this->code . '&action=edit') . '">Zurück</a></p>';
         return $html;
     }
 
@@ -542,18 +574,19 @@ class bx_module_updater {
             }
             try {
                 $updater = new BxGithubModuleUpdater([
-                    'owner'         => $mod['owner'],
-                    'repo'          => $mod['repo'],
-                    'module_name'   => $mod['repo'],
-                    'module_prefix' => $mod['prefix'],
-                    'admin_dir'     => DIR_ADMIN,
-                    'public_key'    => $mod['public_key'],
-                    'allowed_paths' => [],
+                    'owner'           => $mod['owner'],
+                    'repo'            => $mod['repo'],
+                    'module_name'     => $mod['repo'],
+                    'module_prefix'   => $mod['prefix'],
+                    'admin_dir'       => DIR_ADMIN,
+                    'public_key'      => $mod['public_key'],
+                    'allowed_paths'   => ['admin/includes/modules/system'],  // ← MINIMAL: nur Systemmodul-Pfad
                     'current_version' => constant('MODULE_' . $mod['prefix'] . '_VERSION'),
+                    'cache_ttl_seconds' => 60,  // Kurz für Force-Check
                 ]);
                 $updater->checkForUpdate(true); // force refresh
-            } catch (Throwable) {
-                // stillschweigen, Log wäre besser
+            } catch (Throwable $e) {
+                error_log('BX Module Updater Force-Check failed for ' . $mod['code'] . ': ' . $e->getMessage());
             }
         }
     }

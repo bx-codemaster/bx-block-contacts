@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "scopes": {
+        "shop-root": {
+            "hashes": {
+                "/admin_1x2y3z/classes/BX/Github/BxGithubModuleUpdater.php": "6bceba001127994ed0715a5dce004ce8",
+                "/admin_1x2y3z/classes/BX/Github/BxModuleMigration.php": "4c72cd1ad708a0faffb886fe0bfad30d",
+                "/admin_1x2y3z/images/icons/heading/bx_module_updater.png": "43e7a816e829251cd30ff18af5bcc2d1",
+                "/admin_1x2y3z/includes/modules/system/bx_module_updater.php": "29dfa8e556198424f7cb61b4ef657efb",
+                "/lang/english/modules/system/bx_module_updater.php": "931a183619158af7afc6f070281cdf9f",
+                "/lang/german/modules/system/bx_module_updater.php": "a29f8b514477e64b6e1843c7ba022fd4"
+            }
+        },
+        "shop-vendor-mmlc": {
+            "hashes": []
+        }
+    }
+}
