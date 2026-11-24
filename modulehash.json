@@ -3,12 +3,25 @@
     "scopes": {
         "shop-root": {
             "hashes": {
+<<<<<<< HEAD
                 "/admin_1x2y3z/classes/BX/Github/BxGithubModuleUpdater.php": "6bceba001127994ed0715a5dce004ce8",
                 "/admin_1x2y3z/classes/BX/Github/BxModuleMigration.php": "4c72cd1ad708a0faffb886fe0bfad30d",
                 "/admin_1x2y3z/images/icons/heading/bx_module_updater.png": "43e7a816e829251cd30ff18af5bcc2d1",
                 "/admin_1x2y3z/includes/modules/system/bx_module_updater.php": "29dfa8e556198424f7cb61b4ef657efb",
                 "/lang/english/modules/system/bx_module_updater.php": "931a183619158af7afc6f070281cdf9f",
                 "/lang/german/modules/system/bx_module_updater.php": "a29f8b514477e64b6e1843c7ba022fd4"
+=======
+                "/admin_1x2y3z/images/icons/heading/bx_block_contacts.png": "97322f2f06dc62a830a8f0419fa3b34b",
+                "/admin_1x2y3z/includes/classes/BX/Github/BxBlockContactsMigrations.php": "36b5f56c3e0312b83161ac15753f504d",
+                "/admin_1x2y3z/includes/extra/css/bx_block_contacts.php": "1bad4a6a8ac5c5d53d170f81d8196f5d",
+                "/admin_1x2y3z/includes/extra/functions/bx_block_contacts.php": "48c03d082a19473cfc41758b2b805caa",
+                "/admin_1x2y3z/includes/modules/system/bx_block_contacts.php": "a3582b61429ae2cba14827e2920b8933",
+                "/lang/english/extra/admin/bx_block_contacts.php": "651812b75bff987848bb78bcefb5afc5",
+                "/lang/english/modules/system/bx_block_contacts.php": "004f6edfcdc6a3da8915036549c471d4",
+                "/lang/german/extra/admin/bx_block_contacts.php": "4e4cae51a3fdd72d671a6d39745c29af",
+                "/lang/german/modules/system/bx_block_contacts.php": "ff43af2b8fdf7715f6184146730a10c2",
+                "/media/content/bx_block_contacts.php": "d8f07b4b5d35e80a1d64150e9e50fc31"
+>>>>>>> 7fe71feef2613625a076c551dd0411a7468a695b
             }
         },
         "shop-vendor-mmlc": {

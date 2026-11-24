@@ -1,0 +1,634 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * BX Block Contacts system module for modified eCommerce.
+ *
+ * Provides the administrative configuration for blocking contact-form messages
+ * by complete email address, domain, or local part. The module can store and
+ * manage multiple blocked values and exposes the configured values to the
+ * storefront contact-form integration.
+ *
+ * In addition, this module provides a self-contained update mechanism based on
+ * GitHub Releases. On the admin module overview and edit page, the latest release
+ * is checked at configurable intervals and an update is offered when its semantic
+ * version is newer than the installed module version. Release checks are cached;
+ * GitHub and external module servers are not contacted on every request.
+ *
+ * Before an update is installed, the updater performs the following checks:
+ * - The release tag and package name must contain a valid semantic version.
+ * - The archive must be the exact module asset belonging to that version.
+ * - The SHA-256 checksum of the complete ZIP archive must match.
+ * - The package must contain a BX module manifest.
+ * - Every manifest file must match its recorded SHA-256 checksum.
+ * - ZIP paths, symbolic links, file counts and archive sizes must be safe.
+ *
+ * File changes are protected by an exclusive update lock and a backup-based
+ * rollback plan. Files removed from a newer package are deleted when they were
+ * registered by the preceding installed manifest. Update execution is performed
+ * only through the modified admin interface, where the form is protected by the
+ * shop's standard CSRF token mechanism.
+ *
+ * Release archives are created by the GitHub Actions workflow shipped with the
+ * module. They contain the files below the configured source directory at archive
+ * root level plus a generated .bx-module-manifest.json file. The updater is
+ * independent of MMLC and can therefore also be used by manually installed
+ * modules.
+ *
+ * PHP 8.0 or newer and the cURL and ZipArchive extensions are required for the
+ * online update functionality. Normal module operation remains independent from
+ * GitHub once the release status has been cached.
+ *
+ * @package    BX\BlockContacts
+ * @version    1.1.0
+ * @author     Axel Benkert <info@bx-coding.de>
+ * @copyright  2009-present modified eCommerce contributors
+ * @license    GNU General Public License, version 2 or later
+ * @link       https://github.com/bx-codemaster/bx-block-contacts
+ * @since      1.0.0
+ * @requires   PHP >= 8.0
+ */
+
+defined( '_VALID_XTC' ) or die( 'Direct Access to this location is not allowed.' );
+
+class bx_block_contacts {
+	public string $code;
+	public string $title;
+	public string $description;
+	public int $sort_order;
+	public bool $enabled;
+	public string $version;
+	private bool $_check;
+  public array $properties = array();
+  private ?BxGithubModuleUpdater $githubUpdater = null;
+  private ?array $updateStatus = null;
+	public string $development_status; // '' = production ready, 'd' = in development, '' = Idee/Konzept
+
+  public function __construct() {
+    // Bootstrap-Logik für Übergangsphase:zentraler Updater bevorzugt, eigene Kopie nur als Fallback
+    if (!class_exists(BxGithubModuleUpdater::class)) {
+      $bootstrapPath = DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+      if (!is_file($bootstrapPath)) {
+        throw new RuntimeException('bx-module-updater ist nicht installiert.');
+      }
+      require_once $bootstrapPath;
+    } elseif (
+      defined(BxGithubModuleUpdater::class . '::VERSION')
+      && version_compare(BxGithubModuleUpdater::VERSION, '1.1.0', '>')
+    ) {
+      // Zentrale Version ist neuer → eigene Kopie NICHT laden (wird gar nicht mehr ausgeliefert)
+    } else {
+      // Fallback: eigene Kopie laden (für Installationen ohne zentralen Updater)
+      require_once DIR_FS_ADMIN . 'includes/classes/BX/Github/BxGithubModuleUpdater.php';
+    }
+
+    $migrationFile = DIR_FS_ADMIN
+      . 'includes/classes/BX/Github/BxBlockContactsMigrations.php';
+    if (is_file($migrationFile)) {
+      require_once $migrationFile;
+    }
+
+		$this->code        = 'bx_block_contacts';
+    $this->title       = MODULE_BX_BLOCK_CONTACTS_TITLE;
+    $this->description = MODULE_BX_BLOCK_CONTACTS_DESC;
+    $this->sort_order  = defined('MODULE_BX_BLOCK_CONTACTS_SORT_ORDER') ? MODULE_BX_BLOCK_CONTACTS_SORT_ORDER : 0;
+    $this->enabled     = defined('MODULE_BX_BLOCK_CONTACTS_STATUS') && MODULE_BX_BLOCK_CONTACTS_STATUS === 'true';
+    $this->version     = '1.3.0';
+    $this->development_status = 'p';
+
+    if (
+      defined('MODULE_BX_BLOCK_CONTACTS_VERSION')
+      && class_exists(BxBlockContactsMigrations::class)
+    ) {
+      try {
+        BxBlockContactsMigrations::migratePending();
+      } catch (Throwable $migrationException) {
+        global $messageStack;
+        if (isset($messageStack) && is_object($messageStack)) {
+          $messageStack->add_session(
+            'BX Block Contacts Datenbankmigration fehlgeschlagen: '
+              . htmlspecialchars($migrationException->getMessage(), ENT_QUOTES, 'UTF-8'),
+            'error'
+          );
+        }
+      }
+    } elseif (defined('MODULE_BX_BLOCK_CONTACTS_VERSION')) {
+      global $messageStack;
+      if (isset($messageStack) && is_object($messageStack)) {
+        $messageStack->add_session(
+          'BX Block Contacts Migrationsklasse fehlt. Keine Datenbankmigration wurde ausgeführt.',
+          'error'
+        );
+      }
+    }
+
+    if (defined('MODULE_BX_BLOCK_CONTACTS_VERSION')) {
+      $this->updateStatus = $this->getGithubUpdater()->checkForUpdate(
+        ($_GET['bx_updater_refresh'] ?? '') === '1'
+      );
+      $this->properties['button_update'] = $this->createRefreshButton();
+      if (
+        $this->updateStatus['has_update']
+        && !empty($this->updateStatus['zip_url'])
+        && !empty($this->updateStatus['sha256'])
+      ) {
+        $this->properties['button_update'] = $this->createUpdateButton(
+          $this->updateStatus['latest_version'],
+          true
+        ) . $this->properties['button_update'];
+      }
+    }
+  }
+
+  public function process(): void {
+    if (($_POST['bx_updater_action'] ?? '') === 'install') {
+      global $messageStack;
+      $result = $this->getGithubUpdater()->installLatestUpdate();
+      $messageStack->add_session($result['message'], $result['ok'] ? 'success' : 'error');
+      xtc_redirect(xtc_href_link(
+        FILENAME_MODULE_EXPORT,
+        'set=system&module=' . $this->code . '&action=edit'
+      ));
+    }
+
+		$json = array( 'emails' => array(), 'domains' => array(), 'localparts' => array(), );
+
+		if(!empty(MODULE_BX_BLOCK_CONTACTS_BLOCKED)) {
+			$json = json_decode(MODULE_BX_BLOCK_CONTACTS_BLOCKED, true);
+		}
+
+		if(isset($_POST["block_email"]) && !empty($_POST["block_email"])) {
+			if( false === array_search(trim($_POST["block_email"]), $json["emails"])) {
+				array_push($json["emails"], xtc_db_input($_POST["block_email"]));
+			}
+		}
+
+		if(isset($_POST["block_domain"]) && !empty($_POST["block_domain"])) {
+			if( false === array_search(trim($_POST["block_domain"]), $json["domains"])) {
+				array_push($json["domains"], xtc_db_input($_POST["block_domain"]));
+			}
+		}
+
+		if(isset($_POST["block_localparts"]) && !empty($_POST["block_localparts"])) {
+			if( false === array_search(trim($_POST["block_localparts"]), $json["localparts"])) {
+				array_push($json["localparts"], xtc_db_input($_POST["block_localparts"]));
+			}
+		}
+
+		if(isset($_GET["area"]) && !empty($_GET["area"])) {
+			switch($_GET["area"]) {
+				case 'emails':
+					if(isset($_GET["value"]) && !empty($_GET["value"])){
+						$key = array_search(urldecode($_GET["value"]), $json["emails"]);
+						if (false !== $key) {
+							unset($json["emails"][$key]);
+						}
+					}
+					break;
+				case 'domains':
+					if(isset($_GET["value"]) && !empty($_GET["value"])){
+						$key = array_search(urldecode($_GET["value"]), $json["domains"]);
+						if (false !== $key) {
+							unset($json["domains"][$key]);
+						}
+					}
+					break;
+				case 'localparts':
+					if(isset($_GET["value"]) && !empty($_GET["value"])){
+						$key = array_search(urldecode($_GET["value"]), $json["localparts"]);
+						if (false !== $key) {
+							unset($json["localparts"][$key]);
+						}
+					}
+					break;
+			}
+		}
+
+		$blocked = json_encode($json);
+		xtc_db_perform(TABLE_CONFIGURATION, array('configuration_value' => $blocked,
+																								'last_modified' => 'now()'),
+																								'update', "configuration_key='MODULE_BX_BLOCK_CONTACTS_BLOCKED'");
+
+		xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT,'set=system&module='.$this->code.'&action=edit'));
+  }
+
+  public function display(): array {
+    $txt = $this->createUpdateNotice() . '<input type="hidden" name="area" value="" /><input type="hidden" name="areavalue" value="" />
+			<table class="tableConfig">'. "\n"
+	         . '  <tbody>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <th class="txta-l">'.MODULE_BLOCKED_CONTACTS_PLS_BLOCK.':</th>'. "\n"
+	         . '      <th>&nbsp;</th>'. "\n"
+	         . '      <th>&nbsp;</th>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_EMAIL_ADDRESSES.':</td>'. "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_email', '', '').'</td>'. "\n"
+	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_EMAIL_ADDRESSES.'</td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_DOMAINS.':</td>'. "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_domain', '', '').'</td>'. "\n"
+	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_DOMAINS.'</td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td class="col-left">'.MODULE_BLOCKED_CONTACTS_TXT_LOCAL_PARTS.':</td>'. "\n"
+	         . '      <td class="col-middle">'.xtc_draw_input_field('block_localparts', '', '').'</td>'. "\n"
+	         .'       <td class="col-right">'.MODULE_BLOCKED_CONTACTS_DESC_LOCAL_PARTS.'</td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '    <tr>'. "\n"
+	         . '      <td colspan="3"></td>'. "\n"
+	         . '    </tr>'. "\n"
+	         . '  </tbody>'. "\n"
+	         . '</table>'. "\n"
+	         . '<div style="text-align: center;">'. "\n"
+	         . xtc_button(BUTTON_SAVE).xtc_button_link(BUTTON_BACK, xtc_href_link(FILENAME_MODULE_EXPORT, 'set='.$_GET['set'].'&module='.$this->code)). "\n"
+	         . '</div>'. "\n";
+    return array('text' => $txt);
+	}
+
+  public function check(): bool {
+    if (!isset($this->_check)) {
+      $check_query = xtc_db_query("SELECT configuration_value
+                                     FROM ".TABLE_CONFIGURATION."
+                                    WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_STATUS'");
+      $this->_check = xtc_db_num_rows($check_query) > 0;
+    }
+    return $this->_check;
+  }
+
+  public function install(): void {
+		xtc_db_query("ALTER TABLE ".TABLE_ADMIN_ACCESS." ADD bx_block_contacts INTEGER(1)");
+		xtc_db_query("UPDATE ".TABLE_ADMIN_ACCESS." SET bx_block_contacts = 1");
+
+  	$freeId_query = xtc_db_query("SELECT (configuration_group_id+1) AS id
+		                                FROM " . TABLE_CONFIGURATION_GROUP . "
+																		WHERE (configuration_group_id+1) NOT IN (SELECT configuration_group_id FROM " . TABLE_CONFIGURATION_GROUP . " WHERE configuration_group_id IS NOT NULL)
+																		LIMIT 1;");
+		$freeId = xtc_db_fetch_array($freeId_query);
+
+		$freeSort_query = xtc_db_query("SELECT (sort_order+1) AS sort_order
+		                                  FROM ".TABLE_CONFIGURATION_GROUP."
+																			WHERE (sort_order+1) NOT IN (SELECT sort_order FROM ".TABLE_CONFIGURATION_GROUP." WHERE sort_order IS NOT NULL)
+																			LIMIT 1;");
+		$freeSort = xtc_db_fetch_array($freeSort_query);
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION_GROUP." ( configuration_group_id,
+																																configuration_group_title,
+																																configuration_group_description,
+																																sort_order,
+																																visible)
+																											 VALUES ( ".$freeId["id"].",
+																											 					'BX Block Contacts',
+																																'Kontaktverbot für Störenfriede!',
+																																".$freeSort["sort_order"].",
+																																1)");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_STATUS',
+																													'true',
+																													'6',
+																													'1',
+																													now(),
+																													'',
+																													'xtc_cfg_select_option(array(\'true\', \'false\'), ')");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID',
+																								          '".$freeId["id"]."',
+																													'6',
+																													'2',
+																													now(),
+																													'bx_bc_get_group_id',
+																													'xtc_convert_value( ')");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_DEVELOPMENT',
+																								          'unstable',
+																													'6',
+																													'3',
+																													now(),
+																													'',
+																													'xtc_cfg_select_option(array(\\'production\\', \\'development\\', \\'release\\', \\'unstable\\'), ')");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_VERSION',
+																								          '" . $this->version . "',
+																													'6',
+																													'4',
+																													now(),
+																													'',
+																													'')");
+
+		xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_id,
+		                                                    configuration_key,
+																													configuration_value,
+																													configuration_group_id,
+																													sort_order,
+																													date_added,
+																													use_function,
+																													set_function )
+																								 VALUES ( '',
+																								          'MODULE_BX_BLOCK_CONTACTS_BLOCKED',
+																								          '',
+																													'".$freeId["id"]."',
+																													'1',
+																													now(),
+																													'',
+																													'bx_show_blocked( ')");
+
+    $schemaSortQuery = xtc_db_query(
+      "SELECT COALESCE(MAX(sort_order), 0) AS max_sort_order
+       FROM " . TABLE_CONFIGURATION . "
+       WHERE configuration_group_id = " . (int) $freeId["id"]
+    );
+    $schemaSort = $schemaSortQuery
+      ? xtc_db_fetch_array($schemaSortQuery)
+      : array();
+    $schemaSortOrder = ((int) ($schemaSort['max_sort_order'] ?? 0)) + 1;
+
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . "
+                  (configuration_key, configuration_value, configuration_group_id, sort_order, date_added)
+                  VALUES (
+                    'MODULE_BX_BLOCK_CONTACTS_SCHEMA_VERSION',
+                    '1.2.0',
+                    " . (int) $freeId["id"] . ",
+                    " . $schemaSortOrder . ",
+                    NOW()
+                  )");
+	}
+
+  public function remove(): void {
+    xtc_db_query("DELETE FROM ".TABLE_CONFIGURATION." WHERE configuration_key in ('".implode("', '", $this->keys())."')");
+    xtc_db_query(
+      "DELETE FROM " . TABLE_CONFIGURATION
+      . " WHERE configuration_key = 'MODULE_BX_BLOCK_CONTACTS_SCHEMA_VERSION'"
+    );
+		xtc_db_query("DELETE FROM ".TABLE_CONFIGURATION_GROUP." WHERE configuration_group_title = 'BX Block Contacts'");
+		xtc_db_query("ALTER TABLE ".TABLE_ADMIN_ACCESS." DROP bx_block_contacts");
+  }
+
+  public function keys(): array {
+    $key = array(
+      'MODULE_BX_BLOCK_CONTACTS_STATUS',
+			'MODULE_BX_BLOCK_CONTACTS_VERSION',
+			'MODULE_BX_BLOCK_CONTACTS_DEVELOPMENT',
+			'MODULE_BX_BLOCK_CONTACTS_CONFIG_ID',
+      'MODULE_BX_BLOCK_CONTACTS_BLOCKED',
+    );
+    return $key;
+  }
+
+  public function custom(): void {
+    if (($_POST['bx_updater_action'] ?? '') === 'install') {
+      global $messageStack;
+      $result = $this->getGithubUpdater()->installLatestUpdate();
+      $messageStack->add_session($result['message'], $result['ok'] ? 'success' : 'error');
+      return;
+    }
+
+    if (($_GET['delete'] ?? '') !== 'true') {
+      return;
+    }
+
+    global $messageStack;
+    $result = true;
+
+    // Dateien definieren
+    $dirs_and_files   = array();
+
+    $dirs_and_files[] = DIR_FS_ADMIN . 'images/icons/heading/bx_block_contacts.png';
+    $dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/functions/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_ADMIN . 'includes/extra/css/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_ADMIN
+      . 'includes/classes/BX/Github/BxBlockContactsMigrations.php';
+    $dirs_and_files[] = DIR_FS_CATALOG
+      . 'cache/bx_github_updater/bx-block-contacts';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/extra/admin/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/english/modules/system/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/extra/admin/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'lang/german/modules/system/bx_block_contacts.php';
+    $dirs_and_files[] = DIR_FS_CATALOG . 'media/content/bx_block_contacts.php';
+
+    // Dateien löschen
+    foreach ($dirs_and_files as $dir_or_file) {
+      if (!$this->secureDelete($dir_or_file)) {
+        $messageStack->add_session($dir_or_file.MODULE_BX_BLOCK_CONTACTS_TEXT_COULD_NOT_BE_DELETED, 'error');
+        $result = false;
+      }
+    }
+
+    if ($result === true) {
+      $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_SUCCESSFULLY_REMOVED, 'success');
+    } else {
+      $messageStack->add_session(MODULE_BX_BLOCK_CONTACTS_TEXT_REMOVAL_INCOMPLETE, 'error');
+    }
+
+    // Datei selbst löschen
+    $this->secureDelete(DIR_FS_ADMIN.'includes/modules/system/bx_block_contacts.php');
+
+    xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system'));
+  }
+
+  private function getGithubUpdater(): BxGithubModuleUpdater
+  {
+    if ($this->githubUpdater === null) {
+      $this->githubUpdater = new BxGithubModuleUpdater(array(
+        'owner'           => 'bx-codemaster',
+        'repo'            => 'bx-block-contacts',
+        'module_name'     => 'bx-block-contacts',
+        'module_prefix'   => 'BX_BLOCK_CONTACTS',
+        'admin_dir'       => DIR_ADMIN,
+        'public_key'      => 'RhVqKVDgRLHueQs0eYZBgbhU++wzMY5XETzYL+z5q3A=',
+        'allowed_paths' => array(
+          'admin/includes/classes/BX/Github',
+          'admin/includes/extra/functions',
+          'admin/includes/extra/css',
+          'admin/includes/modules/system',
+          'admin/images/icons/heading',
+          'lang/english/extra/admin',
+          'lang/english/modules/system',
+          'lang/german/extra/admin',
+          'lang/german/modules/system',
+          'media/content',
+        ),
+        'current_version' => version_compare(
+          $this->version,
+          MODULE_BX_BLOCK_CONTACTS_VERSION,
+          '>'
+        ) ? $this->version : MODULE_BX_BLOCK_CONTACTS_VERSION,
+      ));
+    }
+    return $this->githubUpdater;
+  }
+
+  private function createUpdateButton(string $version, bool $standaloneForm): string
+  {
+    $formStart   = '';
+    $formEnd     = '';
+    $actionField = ' name="bx_updater_action" value="install"';
+    if ($standaloneForm) {
+      $formStart = xtc_draw_form(
+        'bx_block_contacts_update',
+        FILENAME_MODULE_EXPORT,
+        'set=system&module=' . $this->code . '&action=custom'
+      );
+      $formEnd = '</form>';
+      $actionField = '';
+    }
+
+    return $formStart
+      . ($standaloneForm ? xtc_draw_hidden_field('bx_updater_action', 'install') : '')
+      . '<button type="submit"' . $actionField . ' class="button bx-update" onclick="return confirm(\''
+      . sprintf(
+        MODULE_BX_BLOCK_CONTACTS_UPDATE_CONFIRM,
+        htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
+      )
+      . '\');">'
+      . sprintf(
+        MODULE_BX_BLOCK_CONTACTS_UPDATE_BUTTON,
+        htmlspecialchars($version, ENT_QUOTES, 'UTF-8')
+      )
+      . '</button>' . $formEnd . '<br>';
+  }
+
+  private function createRefreshButton(): string
+  {
+    $label = defined('MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK')
+      ? MODULE_BX_BLOCK_CONTACTS_UPDATE_CHECK
+      : 'Check for updates now';
+
+    return '<a class="button btnbox" href="'
+      . xtc_href_link(
+        FILENAME_MODULE_EXPORT,
+        xtc_get_all_get_params(array('bx_updater_refresh'))
+          . 'bx_updater_refresh=1'
+      )
+      . '" style="width: auto; display: inline-block;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</a>';
+  }
+
+  private function createUpdateNotice(): string
+  {
+    $refreshLink = $this->createRefreshButton();
+
+    if (
+      $this->updateStatus === null
+      || !$this->updateStatus['has_update']
+      || empty($this->updateStatus['latest_version'])
+    ) {
+      return '<div class="messageStackInfo txta-c">'
+        . $refreshLink
+        . '</div>';
+    }
+
+    return '<div class="messageStackWarning txta-c">'
+      . sprintf(
+        MODULE_BX_BLOCK_CONTACTS_UPDATE_AVAILABLE,
+        htmlspecialchars($this->updateStatus['latest_version'], ENT_QUOTES, 'UTF-8')
+      )
+      . '<br>'
+      . (
+        !empty($this->updateStatus['zip_url']) && !empty($this->updateStatus['sha256'])
+          ? $this->createUpdateButton($this->updateStatus['latest_version'], false)
+          : ' ' . MODULE_BX_BLOCK_CONTACTS_UPDATE_NOT_INSTALLABLE
+      )
+      . $refreshLink
+      . '</div>';
+  }
+
+  private function secureDelete(string $path): bool {
+    // 1. Existiert der Pfad überhaupt?
+    if (!file_exists($path)) {
+      return true;
+    }
+
+    // --- SICHERHEITS-CHECK ---
+    // Holt den echten, bereinigten Pfad (löst relative Teile auf)
+    $realPath  = realpath($path);
+    $adminRoot = realpath(DIR_FS_ADMIN);
+
+    // Sicherheitsregel A: Pfad darf nicht leer sein
+    if (empty($realPath) || empty($adminRoot)) {
+      return false;
+    }
+
+    // Sicherheitsregel B: Wenn der Pfad EXAKT dein Admin-Hauptordner
+    // oder das Hauptverzeichnis (/) ist -> SOFORT ABBRECHEN!
+    if ($realPath === $adminRoot || $realPath === DIRECTORY_SEPARATOR) {
+      return false;
+    }
+    // -----------------------------------
+
+    if (!is_writable($realPath)) {
+      return false;
+    }
+
+    // Wenn es eine Datei oder ein Symlink ist -> nur diese löschen und beenden!
+    if (!is_dir($realPath) || is_link($realPath)) {
+      return unlink($realPath);
+    }
+
+    // Nur wenn es ein Ordner ist, wird tiefer gegangen
+    try {
+      $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($realPath, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+      );
+
+      foreach ($iterator as $item) {
+        $itemPath = $item->getRealPath();
+
+        if (!is_writable($itemPath)) {
+          return false;
+        }
+
+        if ($item->isDir() && !$item->isLink()) {
+          if (!rmdir($itemPath)) {
+            return false;
+          }
+        } else {
+          if (!unlink($itemPath)) {
+            return false;
+          }
+        }
+      }
+    } catch (UnexpectedValueException $e) {
+      return false;
+    }
+
+    return rmdir($realPath);
+  }
+}
