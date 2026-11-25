@@ -1,15 +1,21 @@
 {
-    "name": "BX Block Contacts",
-    "archiveName": "bx-codemaster/bx-block-contacts",
+    "name": "BX Module Updater",
+    "archiveName": "bx-codemaster/bx-module-updater",
     "category": "productivity",
     "developer": "Axel Benkert",
     "developerWebsite": "https://www.bx-coding.de",
-    "website": "https://www.bx-coding.de/modified-Module/BX-Block-Contacts--7.html",
+    "website": "https://www.bx-coding.de/modified-Module/BX-Module-Updater--7.html",
     "srcDir": "src",
     "version": "auto",
+<<<<<<< HEAD
+    "shortDescription": "Ein Update-Tool für Modified eCommerce Shops.",
+    "description": "BX Module Updater ermöglicht das automatische Updaten von Modified eCommerce Modulen.",
+    "price": "free", 
+=======
     "shortDescription": "Ein Verwaltungstool für Modified eCommerce Shops.",
     "description": "BX Block Contacts ist ein professionelles Verwaltungstool für Modified eCommerce Shopsofware",
     "price": "free",
+>>>>>>> 7fe71feef2613625a076c551dd0411a7468a695b
     "date": "2026-11-20 00:00:00",
     "php": {
       "version": "^8.0"
