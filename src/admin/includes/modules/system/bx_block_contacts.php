@@ -472,7 +472,7 @@ class bx_block_contacts {
         'module_name'     => 'bx-block-contacts',
         'module_prefix'   => 'BX_BLOCK_CONTACTS',
         'admin_dir'       => DIR_ADMIN,
-        'public_key'      => 'RhVqKVDgRLHueQs0eYZBgbhU++wzMY5XETzYL+z5q3A=',
+        'public_key'      => 'P53dijzxYu0CUop+x+EstzTeVzGWFvOB9EzqVgTxkaQ=',
         'allowed_paths' => array(
           'admin/includes/classes/BX/Github',
           'admin/includes/extra/functions',
